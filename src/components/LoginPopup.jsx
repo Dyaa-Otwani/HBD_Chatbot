@@ -48,7 +48,7 @@ export default function LoginPopup({ onClose, onSuccess }) {
 
         setIsLoading(true);
         try {
-          const response = await fetch('http://127.0.0.1:5000/api/send-otp', {
+          const response = await fetch('/api/send-otp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: cleanEmail, type: 'login' })
@@ -81,7 +81,7 @@ export default function LoginPopup({ onClose, onSuccess }) {
         if (formData.otp === '1234') {
           isVerified = true;
         } else if (method === 'email') {
-          const response = await fetch('http://127.0.0.1:5000/api/verify-otp', {
+          const response = await fetch('/api/verify-otp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: formData.email, otp: formData.otp })

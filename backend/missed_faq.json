@@ -49,6 +49,16 @@
         "unanswered"
       ],
       "answer": ""
+    },
+    {
+      "id": "missed_question",
+      "patterns": [
+        "hii"
+      ],
+      "tags": [
+        "unanswered"
+      ],
+      "answer": ""
     }
   ]
 }

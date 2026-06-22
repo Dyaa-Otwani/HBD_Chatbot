@@ -324,13 +324,13 @@ async def upload_image(file: UploadFile = File(...)):
         with open(filepath, "wb") as f:
             f.write(await file.read())
             
-        # Re-resolve the static URL relative to localhost:5000
-        return {"success": True, "url": f"http://127.0.0.1:5000/static/uploads/{filename}"}
+        # Re-resolve the static URL relative to host via proxy
+        return {"success": True, "url": f"/static/uploads/{filename}"}
     except Exception as e:
         print(f"Upload Error: {e}")
         raise HTTPException(400, str(e))
 
-@app.post("/login")
+@app.post("/api/login")
 def login_legacy(req: LoginRequest):
     """Restore login for frontend compatibility while keeping security in Query"""
     from business_by_phone import get_businesses_by_phone, get_businesses_by_email
@@ -353,7 +353,7 @@ def login_legacy(req: LoginRequest):
     except Exception as e:
         return {"success": True, "status": "registered", "phone": req.phone, "email": req.email, "businesses": []}
 
-@app.post("/query")
+@app.post("/api/query")
 def search(req: SearchRequest):
     try:
         from assistant_manager import classify_intent, get_greeting_response, is_greeting, get_guidance, get_assistant_response
@@ -565,7 +565,7 @@ def search(req: SearchRequest):
     except Exception as e:
         raise HTTPException(400, str(e))
 
-@app.put("/business/{business_id}")
+@app.put("/api/business/{business_id}")
 def update_biz(business_id: int, req: UpdateRequest):
     try:
         from business_update import update_business
@@ -573,7 +573,7 @@ def update_biz(business_id: int, req: UpdateRequest):
         return {"success": True}
     except Exception as e: raise HTTPException(400, str(e))
 
-@app.post("/business")
+@app.post("/api/business")
 def add_biz(req: BusinessAddRequest):
     try:
         from datetime import datetime
@@ -754,7 +754,36 @@ def search_by_address(address: str):
         print(f"Error searching by address: {e}")
         raise HTTPException(400, str(e))
 
+@app.get("/api/categories")
+def get_categories():
+    try:
+        conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
+        cur = conn.cursor()
+        cur.execute("SELECT category, COUNT(*) as count FROM google_maps_listings GROUP BY category ORDER BY count DESC LIMIT 8")
+        rows = cur.fetchall()
+        conn.close()
+        return [{"category": r[0], "count": r[1]} for r in rows if r[0]]
+    except Exception as e:
+        print(f"Error fetching categories: {e}")
+        raise HTTPException(400, str(e))
+
+@app.get("/api/trending")
+def get_trending():
+    try:
+        conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM google_maps_listings WHERE reviews_count > 0 ORDER BY reviews_average DESC, reviews_count DESC LIMIT 4")
+        rows = cur.fetchall()
+        data = [dict(r) for r in rows]
+        conn.close()
+        return map_business_fields(data)
+    except Exception as e:
+        print(f"Error fetching trending: {e}")
+        raise HTTPException(400, str(e))
+
 @app.get("/health")
+@app.get("/api/health")
 def health(): return {"status": "ok"}
 
 # =============================================================================
