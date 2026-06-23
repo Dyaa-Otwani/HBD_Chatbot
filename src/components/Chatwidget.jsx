@@ -1,87 +1,18 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { X, Globe, ChevronDown, ChevronLeft, MoreVertical, Plus, Search, RefreshCw, LogIn, User, Settings, MessageSquare, Trash2, Clock } from 'lucide-react'
+import { X, Globe, ChevronDown, MoreVertical, Plus, Search, RefreshCw, LogIn, Settings, MessageSquare, Trash2, Clock } from 'lucide-react'
 import MessageItem from './MessageItem'
 import LoginPopup from './LoginPopup'
-import QuickActions from './QuickActions'
 import { INDIAN_LANGUAGES } from '../constants/Languages'
 import { UI_TRANSLATIONS } from '../constants/Translations'
-import { SUGGESTIONS_DICTIONARY } from '../constants/Suggestions'
+import { api } from '../services/api'
+import { useChatMemory } from '../hooks/useChatMemory'
+import { useChatWizards, ADD_BIZ_STEPS, getAddProductSteps, getAddDealSteps } from '../hooks/useChatWizards'
 
-/* =========================
-   API CLIENT & MOCKS
- ========================== */
-const API_BASE_URL = 'http://127.0.0.1:5000'
-
-const api = {
-  query: (payload) => fetch(`${API_BASE_URL}/query`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then(res => res.json()),
-  login: (phoneOrEmail, method = 'phone') => {
-    const body = method === 'phone' ? { phone: phoneOrEmail } : { email: phoneOrEmail };
-    return fetch(`${API_BASE_URL}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(res => res.json())
-  },
-  getBusinessByPhone: (phone) => fetch(`${API_BASE_URL}/business/by-phone/${phone}`).then(res => res.json()),
-  getSuggestions: (bizId) => fetch(`${API_BASE_URL}/business/${bizId}/suggestions`).then(res => res.json()),
-  updateBusiness: (bizId, field, value) => fetch(`${API_BASE_URL}/business/${bizId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field, value, updated_by: 'user' }) }).then(res => res.json()),
-  addBusiness: (data) => fetch(`${API_BASE_URL}/business`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(res => res.json()),
-  searchByName: (name) => fetch(`${API_BASE_URL}/api/business/search-name?name=${encodeURIComponent(name)}`).then(res => res.json()),
-  searchByAddress: (addr) => fetch(`${API_BASE_URL}/api/business/search-address?address=${encodeURIComponent(addr)}`).then(res => res.json()),
-  sendEmailOtp: (email, type = "login") => fetch(`${API_BASE_URL}/api/send-otp`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, type }) }).then(res => res.json()),
-  verifyEmailOtp: (email, otp) => fetch(`${API_BASE_URL}/api/verify-otp`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, otp }) }).then(res => res.json()),
-  getAiSuggestions: (text, lang, flow) => fetch(`${API_BASE_URL}/api/smart-suggestions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, language: lang, flow }) }).then(res => res.json()),
-  addProduct: (data) => fetch(`${API_BASE_URL}/api/products`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(res => res.json()),
-  addDeal: (data) => fetch(`${API_BASE_URL}/api/deals`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(res => res.json()),
-  deleteProduct: (id) => fetch(`${API_BASE_URL}/api/products/${id}`, { method: 'DELETE' }).then(res => res.json()),
-  deleteDeal: (id) => fetch(`${API_BASE_URL}/api/deals/${id}`, { method: 'DELETE' }).then(res => res.json()),
-  // ── CHAT MEMORY ──────────────────────────────────────────────────────────
-  createChatSession: (userId) => fetch(`${API_BASE_URL}/api/chats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId, title: 'New Chat' }) }).then(res => res.json()),
-  listChatSessions: (userId) => fetch(`${API_BASE_URL}/api/chats?user_id=${encodeURIComponent(userId)}`).then(res => res.json()),
-  getChatHistory: (sessionId, userId) => fetch(`${API_BASE_URL}/api/chats/${sessionId}?user_id=${encodeURIComponent(userId)}`).then(res => res.json()),
-  deleteChatSession: (sessionId, userId) => fetch(`${API_BASE_URL}/api/chats/${sessionId}?user_id=${encodeURIComponent(userId)}`, { method: 'DELETE' }).then(res => res.json()),
-}
-
-/* =========================
-   CONSTANTS
- ========================== */
-const UPDATE_FIELDS = ['name', 'category', 'phone_number', 'address', 'city', 'email']
-const ADD_BIZ_STEPS = [
-  { key: 'phone', promptKey: 'prompt_phone' },
-  { key: 'email', promptKey: 'prompt_email' },
-  { key: 'otp', promptKey: 'prompt_otp' },
-  { key: 'name', promptKey: 'prompt_name' },
-  { key: 'category', promptKey: 'prompt_cat' },
-  { key: 'address', promptKey: 'prompt_addr' },
-  { key: 'city', promptKey: 'prompt_city' },
-  { key: 'area', promptKey: 'prompt_area' },
-  { key: 'state', promptKey: 'prompt_state' }
-];
-
-const getAddProductSteps = (trans) => [
-  { key: 'name', prompt: trans.prod_name || "What is the product name?" },
-  { key: 'price', prompt: trans.prod_price || "What is the price?" },
-  { key: 'category', prompt: trans.prod_cat || "Product category (e.g. Shoes, Electronics)?" },
-  { key: 'description', prompt: trans.prod_desc || "Short description?" },
-  { key: 'image_url', prompt: trans.prod_img || "Please upload an image for your product (Optional)." }
-];
-
-const getAddDealSteps = (trans) => [
-  { key: 'title', prompt: trans.deal_title || "What is the deal title? (e.g. Holi Midnight Sale)" },
-  { key: 'discount_pct', prompt: trans.deal_disc || "Discount percentage? (Only numbers)" },
-  { key: 'expiry_date', prompt: trans.deal_expiry || "Valid until? (e.g. 2026-04-30)" },
-  { key: 'description', prompt: trans.deal_desc || "Tell us more about this offer." }
-];
-
-/* =========================
-   MAIN COMPONENT
- ========================== */
 const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction, onClearInitialAction }) => {
   const [inputText, setInputText] = useState('')
-  const [flowMode, setFlowMode] = useState('QUERY') // QUERY | UPDATE_VALUE | SEARCH_NAME | SEARCH_ADDR | ADD_WIZARD
   const [quickActionsView, setQuickActionsView] = useState('welcome_screen')
   const [currentLanguage, setCurrentLanguage] = useState('en')
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false)
-  
-  const [wizardStep, setWizardStep] = useState(0)
-  const [wizardData, setWizardData] = useState({})
-  const [pendingUpdateField, setPendingUpdateField] = useState(null)
   const [resetConfirmCount, setResetConfirmCount] = useState(0)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [msgHistory, setMsgHistory] = useState([])
@@ -96,19 +27,36 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
   ])
   const messagesEndRef = useRef(null)
 
-  // ── CHAT MEMORY STATE ─────────────────────────────────────────────────────
-  const [currentSessionId, setCurrentSessionId] = useState(null)
-  const [chatList, setChatList] = useState([])         // list of past sessions
-  const [showChatSidebar, setShowChatSidebar] = useState(false)
-  const [chatListLoading, setChatListLoading] = useState(false)
-  // ─────────────────────────────────────────────────────────────────────────
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false)
+  const [backendHealth, setBackendHealth] = useState('checking')
 
   const hasThinking = (msgs) => msgs.some(m => m.type === 'thinking')
   const addThinking = () => setLocalMessages(prev => hasThinking(prev) ? prev : [...prev, { id: 'thinking', role: 'bot', type: 'thinking' }])
   const removeThinking = () => setLocalMessages(prev => prev.filter(m => m.type !== 'thinking'))
 
-  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false)
-  
+  // Initialize Custom Hooks
+  const wizards = useChatWizards({
+    session,
+    currentLanguage,
+    setLocalMessages,
+    addThinking,
+    removeThinking,
+    setSession,
+    setQuickActionsView
+  });
+
+  const memory = useChatMemory({
+    session,
+    currentLanguage,
+    setLocalMessages,
+    setFlowMode: wizards.setFlowMode,
+    setWizardStep: wizards.setWizardStep,
+    setWizardData: wizards.setWizardData
+  });
+
+  const { flowMode, setFlowMode, wizardStep, setWizardStep, wizardData, setWizardData, pendingUpdateField, setPendingUpdateField } = wizards;
+  const { currentSessionId, setCurrentSessionId, chatList, setChatList, showChatSidebar, setShowChatSidebar, chatListLoading, setChatListLoading, getUserId, startNewSession, loadChatList, loadPastSession, deleteSession, handleNewChat } = memory;
+
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
@@ -116,7 +64,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
   }, [localMessages])
 
   useEffect(() => {
-    // Only update initial messages if user hasn't started a real conversation yet
     const lang = currentLanguage || 'en';
     const trans = UI_TRANSLATIONS[lang] || UI_TRANSLATIONS.en;
     const hint = trans.menu_hint || "💡 Note: Click the three-dot (⋮) menu at the top-right for more options.";
@@ -128,25 +75,18 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
       ])
     }
   }, [currentLanguage])
-  
-  // ── AUTO-INITIALIZE SESSION ON LOGIN ─────────────────────────────────────
+
+  // AUTO-INITIALIZE SESSION ON LOGIN
   useEffect(() => {
     if (isLoggedIn && !currentSessionId && getUserId()) {
       startNewSession().then(() => loadChatList());
     }
   }, [isLoggedIn, session, currentSessionId])
-  // ─────────────────────────────────────────────────────────────────────────
-
-  const [backendHealth, setBackendHealth] = useState('checking')
 
   const checkHealth = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/health`)
-      if (response.ok) {
-        setBackendHealth('Connected')
-      } else {
-        setBackendHealth('Offline')
-      }
+      await api.checkHealth()
+      setBackendHealth('Connected')
     } catch (error) {
       setBackendHealth('Offline')
     }
@@ -178,123 +118,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
     }
   }, [initialAction, onClearInitialAction])
 
-  // ── CHAT MEMORY: helpers ──────────────────────────────────────────────────
-  const getUserId = () => session.phone || session.email || null
-
-  const startNewSession = async () => {
-    const userId = getUserId()
-    if (!userId) return null
-    try {
-      const res = await api.createChatSession(userId)
-      if (res.success) {
-        setCurrentSessionId(res.session_id)
-        return res.session_id
-      }
-    } catch (e) {
-      console.error('Failed to create chat session:', e)
-    }
-    return null
-  }
-
-  const loadChatList = async () => {
-    const userId = getUserId()
-    if (!userId) return
-    setChatListLoading(true)
-    try {
-      const list = await api.listChatSessions(userId)
-      setChatList(Array.isArray(list) ? list : [])
-    } catch(e) {
-      console.error('Failed to load chat list:', e)
-    } finally {
-      setChatListLoading(false)
-    }
-  }
-
-  const loadPastSession = async (sessionId) => {
-    const userId = getUserId()
-    if (!userId) return
-    try {
-      const history = await api.getChatHistory(sessionId, userId)
-      if (!Array.isArray(history)) return
-      const mapped = history.map((h, i) => {
-        let parsedContent = h.content;
-        let msgType = 'text';
-        let intro = null;
-        let suggestions = null;
-        let prompt = null;
-
-        // Try to parse JSON if it looks like a rich message
-        if (typeof h.content === 'string' && (h.content.trim().startsWith('{') || h.content.trim().startsWith('['))) {
-          try {
-            const data = JSON.parse(h.content);
-            if (data && typeof data === 'object') {
-              msgType = data.type || 'text';
-              parsedContent = data.content ?? data.data ?? data.detail ?? data;
-              intro = data.intro;
-              suggestions = data.suggestions;
-              prompt = data.prompt;
-            }
-          } catch(e) { /* fallback to text if parsing fails */ }
-        }
-
-        return {
-          id: `history_${i}_${Date.now()}`,
-          role: h.role === 'assistant' ? 'bot' : 'user',
-          type: msgType,
-          content: parsedContent,
-          intro: intro,
-          suggestions: suggestions,
-          prompt: prompt
-        };
-      })
-      setCurrentSessionId(sessionId)
-      setLocalMessages(mapped.length ? mapped : [{ id: 'init', role: 'bot', type: 'text', content: 'No messages in this session.' }])
-      setShowChatSidebar(false)
-      setFlowMode('QUERY')
-    } catch(e) {
-      console.error('Failed to load past session:', e)
-    }
-  }
-
-  const deleteSession = async (e, sessionId) => {
-    e.stopPropagation()   // prevent triggering loadPastSession
-    const userId = getUserId()
-    if (!userId) return
-    try {
-      await api.deleteChatSession(sessionId, userId)
-      setChatList(prev => prev.filter(s => s.session_id !== sessionId))
-      // If deleted session was active, start fresh
-      if (currentSessionId === sessionId) {
-        setCurrentSessionId(null)
-        const lang = currentLanguage || 'en'
-        const trans = UI_TRANSLATIONS[lang] || UI_TRANSLATIONS.en
-        setLocalMessages([{ id: 'init', role: 'bot', type: 'text', content: trans.welcome }])
-      }
-    } catch(e) {
-      console.error('Failed to delete session:', e)
-    }
-  }
-
-  const handleNewChat = async () => {
-    const lang = currentLanguage || 'en'
-    const trans = UI_TRANSLATIONS[lang] || UI_TRANSLATIONS.en
-    const hint = trans.menu_hint || "💡 Note: Click the three-dot (⋮) menu at the top-right for more options."
-    setLocalMessages([
-      { id: 'init', role: 'bot', type: 'text', content: trans.welcome || trans.welcome_message },
-      { id: 'hint', role: 'bot', type: 'text', content: hint }
-    ])
-    setFlowMode('QUERY')
-    setWizardStep(0)
-    setWizardData({})
-    setCurrentSessionId(null)
-    setShowChatSidebar(false)
-    // Create new session immediately if logged in
-    await startNewSession()
-    // Refresh list
-    await loadChatList()
-  }
-  // ─────────────────────────────────────────────────────────────────────────
-
   const handleBack = () => {
     const lang = currentLanguage || 'en';
     const trans = UI_TRANSLATIONS[lang] || UI_TRANSLATIONS.en;
@@ -302,9 +125,9 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
     if (flowMode === 'ADD_WIZARD' || flowMode === 'ADD_PRODUCT' || flowMode === 'ADD_DEAL') {
       if (wizardStep > 0) {
         setWizardStep(prev => prev - 1)
-        const stepList = flowMode === 'ADD_WIZARD' ? ADD_BIZ_STEPS : (flowMode === 'ADD_PRODUCT' ? ADD_PRODUCT_STEPS : ADD_DEAL_STEPS);
+        const stepList = flowMode === 'ADD_WIZARD' ? ADD_BIZ_STEPS : (flowMode === 'ADD_PRODUCT' ? getAddProductSteps(trans) : getAddDealSteps(trans));
         const prevStep = stepList[wizardStep - 1];
-        setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: prevStep.prompt }])
+        setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: prevStep.prompt || trans[prevStep.promptKey] || prevStep.promptKey }])
       } else {
         setFlowMode('QUERY')
         setQuickActionsView(isLoggedIn ? 'main' : 'welcome_screen')
@@ -370,66 +193,65 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
   }
 
   const handleLoginSuccess = async (identifier, method = 'phone') => {
-    const res = await api.login(identifier, method)
-    
-    if (res.status === 'error') {
-      throw new Error(res.message);
-    }
-    
-    setShowLoginPopup(false)
-    const trans = UI_TRANSLATIONS[currentLanguage || 'en'] || UI_TRANSLATIONS.en;
-    if (res.status === 'logged_in' && res.businesses?.length) {
-      const biz = res.businesses[0]
-      const sessionData = { 
-        type: 'BUSINESS', 
-        businessId: biz.global_business_id 
-      }
-      if (method === 'phone') sessionData.phone = identifier;
-      else {
-        sessionData.email = identifier;
-        if (biz.phone_number) sessionData.phone = biz.phone_number;
+    try {
+      const res = await api.login(identifier, method)
+      if (res.status === 'error') {
+        throw new Error(res.message);
       }
       
-      setSession(sessionData)
-      setIsLoggedIn(true)
-      setQuickActionsView('main')
-      const welcomeMsg = `👋 ${trans.welcome_back}, ${biz.business_name}!`
-      setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: welcomeMsg }])
+      setShowLoginPopup(false)
+      const trans = UI_TRANSLATIONS[currentLanguage || 'en'] || UI_TRANSLATIONS.en;
+      if (res.status === 'logged_in' && res.businesses?.length) {
+        const biz = res.businesses[0]
+        const sessionData = { 
+          type: 'BUSINESS', 
+          businessId: biz.global_business_id 
+        }
+        if (method === 'phone') sessionData.phone = identifier;
+        else {
+          sessionData.email = identifier;
+          if (biz.phone_number) sessionData.phone = biz.phone_number;
+        }
+        
+        setSession(sessionData)
+        setIsLoggedIn(true)
+        setQuickActionsView('main')
+        const welcomeMsg = `👋 ${trans.welcome_back}, ${biz.business_name}!`
+        setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: welcomeMsg }])
 
-      // ── CHAT MEMORY: create a fresh session & load history list ───────────
-      const userId = method === 'phone' ? identifier : (sessionData.email || identifier)
-      try {
-        const sRes = await api.createChatSession(userId)
-        if (sRes.success) setCurrentSessionId(sRes.session_id)
-        const list = await api.listChatSessions(userId)
-        setChatList(Array.isArray(list) ? list : [])
-      } catch(err) { console.error('Chat session init error:', err) }
-      // ─────────────────────────────────────────────────────────────────────
-    } else {
-      const sessionData = { type: 'REGISTERED' }
-      if (method === 'phone') sessionData.phone = identifier;
-      else sessionData.email = identifier;
-      
-      setSession(sessionData)
-      setIsLoggedIn(true)
-      setQuickActionsView('no_business')
-      const welcomeMsg = trans.welcome;
-      const menuHint = trans.menu_hint || "💡 Note: Click the three-dot (⋮) menu at the top-right for more actions.";
-      
-      setLocalMessages(prev => [
-        ...prev, 
-        { id: Date.now(), role: 'bot', type: 'text', content: welcomeMsg },
-        { id: Date.now() + 1, role: 'bot', type: 'text', content: menuHint }
-      ])
+        const userId = method === 'phone' ? identifier : (sessionData.email || identifier)
+        try {
+          const sRes = await api.createChatSession(userId)
+          if (sRes.success) setCurrentSessionId(sRes.session_id)
+          const list = await api.listChatSessions(userId)
+          setChatList(Array.isArray(list) ? list : [])
+        } catch(err) { console.error('Chat session init error:', err) }
+      } else {
+        const sessionData = { type: 'REGISTERED' }
+        if (method === 'phone') sessionData.phone = identifier;
+        else sessionData.email = identifier;
+        
+        setSession(sessionData)
+        setIsLoggedIn(true)
+        setQuickActionsView('no_business')
+        const welcomeMsg = trans.welcome;
+        const menuHint = trans.menu_hint || "💡 Note: Click the three-dot (⋮) menu at the top-right for more actions.";
+        
+        setLocalMessages(prev => [
+          ...prev, 
+          { id: Date.now(), role: 'bot', type: 'text', content: welcomeMsg },
+          { id: Date.now() + 1, role: 'bot', type: 'text', content: menuHint }
+        ])
 
-      // ── CHAT MEMORY: start session even for no-business users ─────────────
-      try {
-        const sRes = await api.createChatSession(identifier)
-        if (sRes.success) setCurrentSessionId(sRes.session_id)
-        const list = await api.listChatSessions(identifier)
-        setChatList(Array.isArray(list) ? list : [])
-      } catch(err) { console.error('Chat session init error:', err) }
-      // ─────────────────────────────────────────────────────────────────────
+        try {
+          const sRes = await api.createChatSession(identifier)
+          if (sRes.success) setCurrentSessionId(sRes.session_id)
+          const list = await api.listChatSessions(identifier)
+          setChatList(Array.isArray(list) ? list : [])
+        } catch(err) { console.error('Chat session init error:', err) }
+      }
+    } catch (e) {
+      alert(`Login error: ${e.message}`);
     }
   }
 
@@ -441,7 +263,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
     setInputText('')
     setLocalMessages(prev => [...prev, { id: Date.now(), role: 'user', type: 'text', content: text }])
     
-    // Add to History (avoid duplicates at the end)
     setMsgHistory(prev => {
       if (prev[prev.length - 1] === text) return prev;
       return [...prev, text];
@@ -454,236 +275,13 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
       const lang = currentLanguage || 'en';
       const trans = UI_TRANSLATIONS[lang] || UI_TRANSLATIONS.en;
       
-      if (flowMode === 'UPDATE_VALUE') {
-        const lang = currentLanguage || 'en';
-        const trans = UI_TRANSLATIONS[lang] || UI_TRANSLATIONS.en;
-        
-        if (pendingUpdateField === 'phone_number') {
-          if (!/^\d{10}$/.test(text.replace(/\s+/g, ''))) {
-            removeThinking()
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.invalid_phone }])
-            return
-          }
-        }
-        if (['address', 'name', 'city', 'state', 'area'].includes(pendingUpdateField)) {
-          if (/^\d+$/.test(text.trim())) {
-            removeThinking()
-            const fieldLabel = pendingUpdateField.replace('_', ' ').toUpperCase();
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: `❌ ${fieldLabel} ${trans.no_numbers}` }])
-            return
-          }
-        }
-
-        const res = await api.updateBusiness(session.businessId, pendingUpdateField, text)
-        removeThinking()
-        
-        if (res.success) {
-          const fieldLabel = pendingUpdateField.replace('_', ' ');
-          const successMsg = lang === 'hi' 
-            ? `✅ ${fieldLabel.toUpperCase()} सफलतापूर्वक अपडेट किया गया!` 
-            : `✅ ${formatFieldName(fieldLabel)} updated successfully!`;
-          setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: successMsg }])
-        } else {
-          setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: `❌ ${res.message || 'Error'}` }])
-        }
-        
-        setFlowMode('QUERY')
-        setPendingUpdateField(null)
-        return
+      // Delegate to Wizards Hook
+      const wasWizardFlow = await wizards.handleWizardSend(text, trans);
+      if (wasWizardFlow) {
+        return;
       }
 
-      if (flowMode === 'SEARCH_NAME') {
-        const results = await api.searchByName(text)
-        removeThinking()
-        if (results.length) {
-          const suggestions = results.map(b => ({ title: b.business_name, reason: `${b.area}, ${b.city}`, action: 'claim_business', payload: b }))
-          setLocalMessages(prev => [
-            ...prev, 
-            { id: Date.now(), role: 'bot', type: 'text', content: trans.found_intro }, 
-            { id: Date.now() + 1, role: 'bot', type: 'suggestions', content: suggestions }
-          ])
-        } else {
-          setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.none_found }])
-        }
-        setFlowMode('QUERY')
-        return
-      }
-
-      if (flowMode === 'SEARCH_ADDR') {
-        const results = await api.searchByAddress(text)
-        removeThinking()
-        if (results.length) {
-          const suggestions = results.map(b => ({ title: b.business_name, reason: b.area, action: 'claim_business', payload: b }))
-          setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'suggestions', content: suggestions }])
-        } else {
-          setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.none_nearby }])
-        }
-        setFlowMode('QUERY')
-        return
-      }
-
-      if (flowMode === 'ADD_WIZARD') {
-        const currentStep = ADD_BIZ_STEPS[wizardStep]
-        if (currentStep.key === 'phone') {
-          if (!/^\d{10}$/.test(text.replace(/\s+/g, ''))) {
-            removeThinking()
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.invalid_phone }])
-            return
-          }
-        }
-        if (currentStep.key === 'email') {
-          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
-            removeThinking()
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.invalid_email }])
-            return
-          }
-        }
-        if (currentStep.key === 'address' || currentStep.key === 'name') {
-          if (/^\d+$/.test(text.trim())) {
-            removeThinking()
-          const fieldLabel = currentStep.key === 'name' ? trans.btn_name : trans.btn_address;
-          setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: `❌ ${fieldLabel} ${trans.no_numbers}` }])
-          return
-          }
-        }
-
-        setWizardData(prev => ({ ...prev, [currentStep.key]: text }))
-
-        if (currentStep.key === 'email') {
-          await api.sendEmailOtp(text, "registration")
-        } else if (currentStep.key === 'otp') {
-          const res = await api.verifyEmailOtp(wizardData.email, text)
-          if (!res.success) {
-            removeThinking()
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: '❌ Invalid OTP. Try again.' }])
-            return
-          }
-        }
-
-        const nextStep = wizardStep + 1
-        if (nextStep < ADD_BIZ_STEPS.length) {
-          setWizardStep(nextStep)
-          removeThinking()
-          const nextBizStep = ADD_BIZ_STEPS[nextStep]
-          const nextPrompt = trans[nextBizStep.promptKey] || nextBizStep.promptKey
-          setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: nextPrompt }])
-        } else {
-          // Final Step - Complete Registration
-          const finalData = { 
-            ...wizardData, 
-            [currentStep.key]: text, 
-            language: lang,
-            // Fallback to session email/phone if wizard somehow missed it
-            email: wizardData.email || session.email || "",
-            phone: wizardData.phone || session.phone || ""
-          }
-          console.log("DEBUG: Finalizing Business Registration:", finalData);
-          const res = await api.addBusiness(finalData)
-          removeThinking()
-          setFlowMode('QUERY')
-          if (res.success) {
-            setSession({ type: 'BUSINESS', phone: finalData.phone, businessId: res.id })
-            setQuickActionsView('main')
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.business_added }])
-          } else {
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: `❌ ${res.message || 'Error'}` }])
-          }
-        }
-        return
-      }
-
-      if (flowMode === 'ADD_PRODUCT') {
-        const ADD_PRODUCT_STEPS = getAddProductSteps(trans)
-        const currentStep = ADD_PRODUCT_STEPS[wizardStep]
-        let cleanedValue = text;
-        
-        // Sanitize Price — extract the first clean integer/decimal from text
-        if (currentStep.key === 'price') {
-          // Match a number like 23000 or 23000.50 — ignore currency symbols/text
-          const match = text.replace(/,/g, '').match(/\d+(\.\d+)?/);
-          if (!match) {
-            removeThinking()
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "❌ Please enter a valid price (e.g. 23000 or 23000.50)." }])
-            return
-          }
-          cleanedValue = parseFloat(match[0]);
-        }
-
-        const nextStep = wizardStep + 1
-        if (nextStep < ADD_PRODUCT_STEPS.length) {
-          setWizardData(prev => ({ ...prev, [currentStep.key]: cleanedValue }))
-          setWizardStep(nextStep)
-          removeThinking()
-          setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: ADD_PRODUCT_STEPS[nextStep].prompt }])
-        } else {
-          // business_id must come LAST so wizardData spread cannot overwrite it
-          const finalData = { 
-            ...wizardData, 
-            [currentStep.key]: cleanedValue,
-            business_id: session.businessId   // ← always last
-          }
-          console.log("Submitting Product:", JSON.stringify(finalData));
-          if (!finalData.business_id) {
-            removeThinking()
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "❌ Please login first before adding a product." }])
-            return
-          }
-          const res = await api.addProduct(finalData)
-          removeThinking()
-          setFlowMode('QUERY')
-          if (res.success) {
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "✅ Product added successfully!" }])
-          } else {
-            console.error("API error adding product:", res);
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "❌ Error: " + (res.detail || "Could not add product.") }])
-          }
-        }
-        return
-      }
-
-      if (flowMode === 'ADD_DEAL') {
-        // FIX: define ADD_DEAL_STEPS here so it is in scope
-        const ADD_DEAL_STEPS = getAddDealSteps(trans)
-        const currentStep = ADD_DEAL_STEPS[wizardStep]
-        let cleanedValue = text;
-
-        // Sanitize Discount %
-        if (currentStep.key === 'discount_pct') {
-          const numeric = text.replace(/[^0-9]/g, '');
-          if (!numeric || isNaN(parseInt(numeric))) {
-            removeThinking()
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "❌ Please enter a valid percentage (numbers only)." }])
-            return
-          }
-          cleanedValue = parseInt(numeric);
-        }
-
-        const nextStep = wizardStep + 1
-        if (nextStep < ADD_DEAL_STEPS.length) {
-          setWizardData(prev => ({ ...prev, [currentStep.key]: cleanedValue }))
-          setWizardStep(nextStep)
-          removeThinking()
-          setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: ADD_DEAL_STEPS[nextStep].prompt }])
-        } else {
-          const finalData = { 
-            ...wizardData, 
-            [currentStep.key]: cleanedValue,
-            business_id: session.businessId  // ← always last
-          }
-          console.log("Submitting Deal:", JSON.stringify(finalData));
-          const res = await api.addDeal(finalData)
-          removeThinking()
-          setFlowMode('QUERY')
-          if (res.success) {
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "✅ Deal posted successfully!" }])
-          } else {
-            setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "❌ Error posting deal." }])
-          }
-        }
-        return
-      }
-
-      // DEFAULT QUERY FLOW — pass session_id for memory
+      // DEFAULT QUERY FLOW
       let activeSessionId = currentSessionId;
       if (isLoggedIn && !activeSessionId) {
         activeSessionId = await startNewSession();
@@ -718,15 +316,14 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
       const lang = currentLanguage || 'en';
       const trans = UI_TRANSLATIONS[lang] || UI_TRANSLATIONS.en;
       console.error("handleSend Error:", e);
-      setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.generic_error || 'Something went wrong.' }])
+      setLocalMessages(prev => [...prev, { 
+        id: Date.now(), 
+        role: 'bot', 
+        type: 'text', 
+        content: `⚠️ ${trans.generic_error || 'Something went wrong.'} (${e.message})` 
+      }])
     }
   }
-
-  // Helper for formatting field names
-  const formatFieldName = (field) =>
-    field
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, c => c.toUpperCase());
 
   const handleKeyDown = (e) => {
     if (msgHistory.length === 0) return;
@@ -833,7 +430,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
     }
 
     if (action === 'confirm_reset') {
-      // Optional: Delete the session from database if you want it completely removed from history
       if (currentSessionId && getUserId()) {
         api.deleteChatSession(currentSessionId, getUserId()).then(() => loadChatList());
       }
@@ -849,7 +445,7 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
       setQuickActionsView(isLoggedIn ? (session.type === 'BUSINESS' ? 'main' : 'no_business') : 'welcome_screen')
       setWizardStep(0)
       setWizardData({})
-      setCurrentSessionId(null)  // will trigger auto-creation of NEW session via useEffect
+      setCurrentSessionId(null)
       return
     }
 
@@ -858,7 +454,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
     if (action === 'search') {
       addThinking()
       try {
-        // Use 'show my business' — NOT in cmd_map so goes through auth path correctly
         const data = await api.query({ 
           query: "show my business", 
           session, 
@@ -894,7 +489,7 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
           session_id: currentSessionId 
         })
         removeThinking()
-        setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'suggestions', content: data.content, intro: data.intro }])
+        setLocalMessages(prev => [...prev, { id: Date.now(), role: 'suggestions', content: data.content, intro: data.intro }])
       } catch(e) { removeThinking() }
     }
     if (action === 'update_specific') {
@@ -923,7 +518,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
         addThinking();
         try {
           const lang2 = currentLanguage || 'en';
-          // Use 'manage product' (singular) to bypass backend cmd_map exact match on 'manage products'
           const data = await api.query({ 
             query: 'manage product', 
             session, 
@@ -937,7 +531,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
             content: data.content !== undefined ? data.content : (data.data || (data.type === 'faq' ? data.data : '')),
             intro: data.intro
           }])
-          // If faq type (no products yet), show as text
           if (data.type === 'faq') {
             setLocalMessages(prev => { const msgs = [...prev]; msgs[msgs.length-1] = { ...msgs[msgs.length-1], type: 'text', content: data.data || 'No products found.' }; return msgs; })
           }
@@ -947,7 +540,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
         addThinking();
         try {
           const lang2 = currentLanguage || 'en';
-          // Use 'manage deal' (singular) to bypass backend cmd_map exact match on 'manage deals'
           const data = await api.query({ 
             query: 'manage deal', 
             session, 
@@ -961,7 +553,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
             content: data.content !== undefined ? data.content : (data.data || (data.type === 'faq' ? data.data : '')),
             intro: data.intro
           }])
-          // If faq type (no deals yet), show as text
           if (data.type === 'faq') {
             setLocalMessages(prev => { const msgs = [...prev]; msgs[msgs.length-1] = { ...msgs[msgs.length-1], type: 'text', content: data.data || 'No deals found.' }; return msgs; })
           }
@@ -971,7 +562,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
         const res = await api.deleteProduct(payload);
         if (res.success) {
           setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "🗑️ Product removed successfully!" }])
-          // Auto-refresh the products list
           setTimeout(() => handleAction('manage_products'), 300)
         }
     }
@@ -979,68 +569,15 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
         const res = await api.deleteDeal(payload);
         if (res.success) {
           setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "🗑️ Deal removed successfully!" }])
-          // Auto-refresh the deals list
           setTimeout(() => handleAction('manage_deals'), 300)
         }
     }
   }
 
-  const handleImageUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    addThinking();
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/upload`, {
-        method: 'POST',
-        body: formData
-      }).then(r => r.json());
-
-      removeThinking();
-      if (res.success) {
-        const currentData = { ...wizardData, image_url: res.url };
-        setWizardData(currentData);
-        setLocalMessages(prev => [...prev, { id: Date.now(), role: 'user', type: 'text', content: 'Image uploaded successfully ✅' }]);
-        
-        // Finalize (last step)
-        finalizeProduct(currentData);
-      } else {
-        setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: '❌ Upload failed. Please try again.' }]);
-      }
-    } catch (err) {
-      removeThinking();
-      setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: '❌ Upload error.' }]);
-    }
-  };
-
-  const finalizeProduct = async (data) => {
-    addThinking();
-    const finalData = { 
-      ...data, 
-      business_id: session.businessId 
-    };
-    const res = await api.addProduct(finalData);
-    removeThinking();
-    setFlowMode('QUERY');
-    if (res.success) {
-      setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "✅ Product added successfully!" }]);
-    } else {
-      setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: "❌ Error: " + (res.detail || "Could not add product.") }]);
-    }
-  };
-
-  const handleImageSkip = () => {
-    setLocalMessages(prev => [...prev, { id: Date.now(), role: 'user', type: 'text', content: 'Skipped image ⏭️' }]);
-    finalizeProduct({...wizardData, image_url: ""});
-  };
-
   return (
     <div className="flex flex-col h-full bg-[#F8FAFC] relative overflow-hidden">
 
-      {/* ── CHAT HISTORY SIDEBAR ───────────────────────────────────────────── */}
+      {/* CHAT HISTORY SIDEBAR */}
       {showChatSidebar && (
         <>
           {/* Backdrop */}
@@ -1117,12 +654,10 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
           </div>
         </>
       )}
-      {/* ── END SIDEBAR ────────────────────────────────────────────────────── */}
 
       {/* HEADER */}
       <div className="p-4 bg-white border-b border-gray-100 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-3">
-          {/* Chat History Toggle Button */}
           {isLoggedIn && (
             <button
               onClick={() => { setShowChatSidebar(true); loadChatList(); }}
@@ -1136,9 +671,9 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
           <div>
             <h2 className="text-sm font-bold text-gray-800">CityHangAround</h2>
             <div className="flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${backendHealth === 'Connected' ? 'bg-green-500 animate-pulse' : backendHealth === 'Offline' ? 'bg-red-500' : 'bg-yellow-500'}`}></span>
+              <span className={`w-1.5 h-1.5 rounded-full ${backendHealth === 'Connected' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
               <span className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">
-                {backendHealth === 'Connected' ? 'Connected' : backendHealth === 'Offline' ? 'Offline' : 'Checking...'}
+                {backendHealth === 'Connected' ? 'Connected' : 'Offline'}
               </span>
             </div>
           </div>
@@ -1185,17 +720,13 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
 
             {isActionsMenuOpen && (
               <>
-                {/* Backdrop overlay */}
                 <div className="fixed inset-0 z-40" onClick={() => setIsActionsMenuOpen(false)} />
-                
                 <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl z-50 overflow-hidden" style={{boxShadow: '0 10px 40px rgba(79,70,229,0.15), 0 2px 10px rgba(0,0,0,0.08)'}}>
-                  {/* Header with gradient */}
                   <div className="px-4 py-3 bg-gradient-to-r from-[#4F46E5] to-[#7C3AED]">
                     <p className="text-[11px] font-bold text-white/90 tracking-wide">{UI_TRANSLATIONS[currentLanguage || 'en']?.how_continue || "Actions"}</p>
                   </div>
                   
                   <div className="py-1.5">
-                    {/* ACTIONS LIST */}
                     {!isLoggedIn ? (
                       <>
                         <button onClick={() => { setIsActionsMenuOpen(false); handleAction('login_trigger') }} className="w-full flex items-center gap-3 px-4 py-2.5 text-xs text-gray-700 hover:bg-indigo-50/60 transition-all duration-150 group">
@@ -1262,8 +793,23 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-400"><X size={18} /></button>
         </div>
       </div>
+
       {/* MESSAGES */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+        {backendHealth === 'Offline' && (
+          <div className="p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl flex flex-col gap-2 shadow-sm animate-in fade-in duration-300">
+            <p className="text-xs font-bold">⚠️ Connection Issue</p>
+            <p className="text-[11px] leading-relaxed text-amber-700">
+              The backend server appears to be offline. Make sure `START_SERVER.bat` in the backend folder is running and serving on port 5000.
+            </p>
+            <button 
+              onClick={checkHealth}
+              className="w-fit text-[10px] font-bold bg-amber-600 text-white px-3 py-1.5 rounded-lg hover:bg-amber-700 transition-all active:scale-95 mt-1"
+            >
+              Retry Connection
+            </button>
+          </div>
+        )}
         {localMessages.map((msg) => (
           <MessageItem key={msg.id} message={msg} onAction={handleAction} isLoggedIn={isLoggedIn} session={session} />
         ))}
@@ -1273,8 +819,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
       {/* PREMIUM ACTIONS TRAY / CURRENCY SHORTCUTS */}
       {isLoggedIn && session.businessId && (flowMode === 'QUERY' || (flowMode === 'ADD_PRODUCT' && wizardStep === 1)) && (
         <div className="flex gap-2 px-3 py-2 bg-gray-50/50 border-t border-gray-100 overflow-x-auto no-scrollbar animate-in slide-in-from-bottom-2 duration-300">
-          
-          {/* Default Actions — only in QUERY mode */}
           {flowMode === 'QUERY' && (
             <>
               <button 
@@ -1308,7 +852,6 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
             </>
           )}
 
-          {/* Currency Shortcuts for Price Step — only shown when in ADD_PRODUCT price step */}
           {flowMode === 'ADD_PRODUCT' && wizardStep === 1 && (
             <div className="flex gap-2 items-center">
               <span className="text-[10px] font-bold text-gray-400 mr-1 uppercase">Price Helpers:</span>
@@ -1326,7 +869,7 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
         </div>
       )}
 
-      {/* INPUT AREA - image upload only on ADD_PRODUCT step 4 (image step, index 4) */}
+      {/* INPUT AREA */}
       <form onSubmit={handleSend} className="p-3 border-t border-gray-200 flex gap-2 bg-white">
         {flowMode === 'ADD_PRODUCT' && wizardStep === 4 ? (
           <div className="flex-1 flex items-center gap-2 animate-in slide-in-from-bottom-2 duration-300">
@@ -1335,7 +878,7 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
               accept="image/*"
               id="product-image-upload"
               className="hidden"
-              onChange={(e) => handleImageUpload(e)}
+              onChange={(e) => wizards.handleImageUpload(e)}
             />
             <label
               htmlFor="product-image-upload"
@@ -1345,7 +888,7 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
             </label>
             <button 
               type="button"
-              onClick={() => handleImageSkip()}
+              onClick={() => wizards.handleImageSkip()}
               className="text-gray-400 text-[11px] font-bold px-3 py-2 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors capitalize"
             >
               Skip
