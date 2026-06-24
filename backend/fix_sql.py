@@ -1,0 +1,5 @@
+content = open('text_to_sql.py', 'r', encoding='utf-8').read()
+content = content.replace('google_maps_listings', 'g_map_master_table')
+content = content.replace('reviews_average', 'ratings')
+open('text_to_sql.py', 'w', encoding='utf-8').write(content)
+print('Done. text_to_sql.py table references updated.')

@@ -27,6 +27,9 @@ const ChatArea = ({
   onClearInitialQuery,
   initialAction,
   onClearInitialAction,
+  // Floating widget support
+  isFloating = false,
+  onClose,
 }) => {
   const [inputText, setInputText] = useState('');
   const [currentLanguage, setCurrentLanguage] = useState('en');
@@ -641,6 +644,22 @@ const ChatArea = ({
               </>
             )}
           </div>
+          {isFloating && (
+            <button
+              onClick={onClose}
+              style={{
+                padding: 7, borderRadius: 8, border: 'none', cursor: 'pointer',
+                background: 'transparent', color: 'var(--text-muted)',
+                transition: 'all var(--transition-fast)',
+                display: 'flex', alignItems: 'center', justifyItems: 'center',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-surface-2)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+              aria-label="Close chat"
+            >
+              <X size={17} />
+            </button>
+          )}
         </div>
       </div>
 

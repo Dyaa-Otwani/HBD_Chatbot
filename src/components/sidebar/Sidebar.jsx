@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   MessageSquare, Home, Settings, Plus, ChevronLeft, ChevronRight,
-  Sun, Moon, LogOut, User, Search, X
+  Sun, Moon, LogOut, User, Search, X, BarChart2, Info, Grid
 } from 'lucide-react';
+
 import ChatHistoryList from './ChatHistoryList';
 
 export default function Sidebar({
@@ -176,6 +177,9 @@ export default function Sidebar({
         <div style={{ padding: '0 10px 8px', flexShrink: 0 }}>
           <NavItem to="/" icon={<Home size={16} />} label="Home" collapsed={collapsed} />
           <NavItem to="/chat" icon={<MessageSquare size={16} />} label="Chat" collapsed={collapsed} />
+          <NavItem to="/categories" icon={<Grid size={16} />} label="Categories" collapsed={collapsed} />
+          <NavItem to="/analytics" icon={<BarChart2 size={16} />} label="Analytics" collapsed={collapsed} />
+          <NavItem to="/about" icon={<Info size={16} />} label="About" collapsed={collapsed} />
         </div>
 
         {/* ─── SEARCH (only when expanded) ────────── */}

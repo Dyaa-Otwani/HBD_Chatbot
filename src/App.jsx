@@ -3,6 +3,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import HomePage from './pages/HomePage';
 import ChatPage from './pages/ChatPage';
+import AnalyticsPage from './pages/AnalyticsPage';
+import AboutPage from './pages/AboutPage';
+import CategoriesPage from './pages/CategoriesPage';
 import Toast from './components/ui/Toast';
 import { useTheme } from './hooks/useTheme';
 import { useToast } from './hooks/useToast';
@@ -84,7 +87,10 @@ function AppShell() {
         >
           <Route index element={<HomePage toast={toast} />} />
           <Route path="chat" element={<ChatPage {...sharedProps} />} />
-          {/* Redirect any unknown paths to home */}
+          <Route path="categories" element={<CategoriesPage toast={toast} />} />
+          <Route path="analytics" element={<AnalyticsPage toast={toast} />} />
+          <Route path="about" element={<AboutPage toast={toast} />} />
+          {/* Redirect unknown paths to home */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

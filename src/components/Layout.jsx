@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
-import { Menu } from 'lucide-react';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Menu, X } from 'lucide-react';
 import Sidebar from './sidebar/Sidebar';
 import { useTheme } from '../hooks/useTheme';
+import ChatArea from './chat/ChatArea';
 
 export default function Layout({
   isLoggedIn, setIsLoggedIn,
@@ -19,6 +20,8 @@ export default function Layout({
   const [mobileOpen, setMobileOpen] = useState(false);
   const { isDark, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [showFloatingChat, setShowFloatingChat] = useState(false);
 
   // Close mobile sidebar when window resizes to desktop
   useEffect(() => {
@@ -98,6 +101,43 @@ export default function Layout({
           <Outlet />
         </div>
       </div>
+
+      {/* Floating Chatbot Widget (Myntra-style) */}
+      {location.pathname !== '/chat' && (
+        <>
+          {showFloatingChat && (
+            <div className="floating-chat-widget">
+              <ChatArea
+                isLoggedIn={isLoggedIn}
+                setIsLoggedIn={setIsLoggedIn}
+                session={session}
+                setSession={setSession}
+                currentSessionId={currentSessionId}
+                setCurrentSessionId={setCurrentSessionId}
+                chatList={chatList}
+                setChatList={setChatList}
+                chatListLoading={chatListLoading}
+                setChatListLoading={setChatListLoading}
+                toast={toast}
+                isFloating={true}
+                onClose={() => setShowFloatingChat(false)}
+              />
+            </div>
+          )}
+          
+          <button
+            className="floating-chat-launcher"
+            onClick={() => setShowFloatingChat(!showFloatingChat)}
+            aria-label={showFloatingChat ? "Close chat assistant" : "Open chat assistant"}
+          >
+            {showFloatingChat ? (
+              <X size={24} style={{ color: 'white' }} />
+            ) : (
+              <img src="/avatar.png" alt="AI Assistant Avatar" />
+            )}
+          </button>
+        </>
+      )}
     </div>
   );
 }
