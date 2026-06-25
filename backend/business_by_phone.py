@@ -1,19 +1,42 @@
-# business_by_phone.py
+# business_by_phone.py - Updated to use correct g_map_master_table
 
 import sqlite3
 import csv
 import os
 import re
 
+BIZ_TABLE = "g_map_master_table"
+
 def normalize_phone(phone: str) -> str:
-    # Only numeric
     p = re.sub(r'\D', '', phone)
-    # Remove +91, "0 from starting", etc
     if p.startswith('91') and len(p) == 12:
         p = p[2:]
     elif p.startswith('0') and len(p) == 11:
         p = p[1:]
     return p
+
+def row_to_dict(row_dict):
+    """Convert g_map_master_table row to standard business dict"""
+    return {
+        "global_business_id": row_dict.get("global_business_id"),
+        "id": row_dict.get("global_business_id"),
+        "business_name": row_dict.get("business_name"),
+        "name": row_dict.get("business_name"),
+        "address": row_dict.get("address"),
+        "phone_number": row_dict.get("phone_number"),
+        "ratings": row_dict.get("ratings", 0),
+        "reviews_average": row_dict.get("ratings", 0),
+        "reviews_count": row_dict.get("reviews_count", 0),
+        "business_category": row_dict.get("business_category"),
+        "category": row_dict.get("business_category"),
+        "subcategory": row_dict.get("subcategory"),
+        "website_url": row_dict.get("website_url"),
+        "website": row_dict.get("website_url"),
+        "area": row_dict.get("area"),
+        "city": row_dict.get("city"),
+        "state": row_dict.get("state"),
+        "email": row_dict.get("email")
+    }
 
 def get_businesses_by_phone(phone: str):
     search_phone = normalize_phone(phone)
@@ -22,15 +45,12 @@ def get_businesses_by_phone(phone: str):
 
     db_path = os.path.join(os.path.dirname(__file__), "google_map_data.db")
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Step 2: Search in business.db
     cursor.execute(
-        """
-        SELECT 
-            id, name, address, phone_number, reviews_average, reviews_count,
-            category, subcategory, website, area, city, state, email
-        FROM google_maps_listings
+        f"""
+        SELECT * FROM {BIZ_TABLE}
         WHERE REPLACE(phone_number, ' ', '') LIKE ?
         LIMIT 1
         """,
@@ -38,16 +58,15 @@ def get_businesses_by_phone(phone: str):
     )
 
     row = cursor.fetchone()
-    columns = [desc[0] for desc in cursor.description]
-
     if row:
-        businesses = [dict(zip(columns, row))]
+        result = row_to_dict(dict(row))
         conn.close()
-        return businesses
+        return [result]
 
-    businesses = []
+    conn.close()
     
-    # Step 3: Check CSV
+    # Step: Check CSV
+    businesses = []
     csv_file_path = os.path.join(os.path.dirname(__file__), "g_map_master_table_sample.csv")
     if os.path.exists(csv_file_path):
         found_row = None
@@ -56,30 +75,32 @@ def get_businesses_by_phone(phone: str):
             for row in reader:
                 row_phone = str(row.get("phone_number", ""))
                 norm_row_phone = normalize_phone(row_phone)
-                
                 if search_phone and search_phone in norm_row_phone:
                     found_row = row
                     break
         
-        # Step 4: If Found in CSV -> Insert into DB
         if found_row:
+            # Insert into DB
             try:
-                cursor.execute(
-                    """
-                    INSERT INTO google_maps_listings (
-                        id, name, address, website, phone_number,
-                        reviews_count, reviews_average, category, 
+                conn2 = sqlite3.connect(db_path)
+                conn2.row_factory = sqlite3.Row
+                cur2 = conn2.cursor()
+                cur2.execute(
+                    f"""
+                    INSERT INTO {BIZ_TABLE} (
+                        csv_id, business_name, address, website_url, phone_number,
+                        reviews_count, ratings, business_category, 
                         subcategory, city, state, area, created_at, email
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        found_row.get("id") or None,
+                        found_row.get("id"),
                         found_row.get("name"),
                         found_row.get("address"),
                         found_row.get("website"),
-                        found_row.get("phone_number"), 
+                        found_row.get("phone_number"),
                         int(found_row.get("reviews_count") or 0),
-                        float(found_row.get("reviews_average") or 0.0),
+                        float(found_row.get("reviews_avg") or 0.0),
                         found_row.get("category"),
                         found_row.get("subcategory"),
                         found_row.get("city"),
@@ -89,19 +110,27 @@ def get_businesses_by_phone(phone: str):
                         found_row.get("email")
                     )
                 )
-                conn.commit()
+                new_id = cur2.lastrowid
+                conn2.commit()
+                conn2.close()
             except sqlite3.Error as e:
                 print(f"Error inserting CSV record to DB: {e}")
+                new_id = None
                 
             businesses.append({
-                "id": found_row.get("id"),
+                "global_business_id": new_id,
+                "id": new_id,
+                "business_name": found_row.get("name"),
                 "name": found_row.get("name"),
                 "address": found_row.get("address"),
                 "phone_number": found_row.get("phone_number"),
-                "reviews_average": float(found_row.get("reviews_average") or 0.0),
+                "ratings": float(found_row.get("reviews_avg") or 0.0),
+                "reviews_average": float(found_row.get("reviews_avg") or 0.0),
                 "reviews_count": int(found_row.get("reviews_count") or 0),
+                "business_category": found_row.get("category"),
                 "category": found_row.get("category"),
                 "subcategory": found_row.get("subcategory"),
+                "website_url": found_row.get("website"),
                 "website": found_row.get("website"),
                 "area": found_row.get("area"),
                 "city": found_row.get("city"),
@@ -109,9 +138,6 @@ def get_businesses_by_phone(phone: str):
                 "email": found_row.get("email")
             })
 
-    conn.close()
-    
-    # Step 5: If Phone Number Not Found
     if not businesses:
         raise ValueError("Phone number not registered")
         
@@ -124,15 +150,12 @@ def get_businesses_by_email(email: str):
 
     db_path = os.path.join(os.path.dirname(__file__), "google_map_data.db")
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Search in DB
     cursor.execute(
-        """
-        SELECT 
-            id, name, address, phone_number, reviews_average, reviews_count,
-            category, subcategory, website, area, city, state, email
-        FROM google_maps_listings
+        f"""
+        SELECT * FROM {BIZ_TABLE}
         WHERE LOWER(email) = ?
         LIMIT 1
         """,
@@ -140,16 +163,14 @@ def get_businesses_by_email(email: str):
     )
 
     row = cursor.fetchone()
-    columns = [desc[0] for desc in cursor.description]
-
     if row:
-        businesses = [dict(zip(columns, row))]
+        result = row_to_dict(dict(row))
         conn.close()
-        return businesses
+        return [result]
 
-    businesses = []
+    conn.close()
     
-    # Check CSV
+    businesses = []
     csv_file_path = os.path.join(os.path.dirname(__file__), "g_map_master_table_sample.csv")
     if os.path.exists(csv_file_path):
         found_row = None
@@ -161,25 +182,26 @@ def get_businesses_by_email(email: str):
                     found_row = row
                     break
         
-        # If Found in CSV -> Insert into DB
         if found_row:
             try:
-                cursor.execute(
-                    """
-                    INSERT INTO google_maps_listings (
-                        id, name, address, website, phone_number,
-                        reviews_count, reviews_average, category, 
+                conn2 = sqlite3.connect(db_path)
+                cur2 = conn2.cursor()
+                cur2.execute(
+                    f"""
+                    INSERT INTO {BIZ_TABLE} (
+                        csv_id, business_name, address, website_url, phone_number,
+                        reviews_count, ratings, business_category,
                         subcategory, city, state, area, created_at, email
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        found_row.get("id") or None,
+                        found_row.get("id"),
                         found_row.get("name"),
                         found_row.get("address"),
                         found_row.get("website"),
-                        found_row.get("phone_number"), 
+                        found_row.get("phone_number"),
                         int(found_row.get("reviews_count") or 0),
-                        float(found_row.get("reviews_average") or 0.0),
+                        float(found_row.get("reviews_avg") or 0.0),
                         found_row.get("category"),
                         found_row.get("subcategory"),
                         found_row.get("city"),
@@ -189,19 +211,27 @@ def get_businesses_by_email(email: str):
                         found_row.get("email")
                     )
                 )
-                conn.commit()
+                new_id = cur2.lastrowid
+                conn2.commit()
+                conn2.close()
             except sqlite3.Error as e:
                 print(f"Error inserting CSV record to DB by email: {e}")
+                new_id = None
                 
             businesses.append({
-                "id": found_row.get("id"),
+                "global_business_id": new_id,
+                "id": new_id,
+                "business_name": found_row.get("name"),
                 "name": found_row.get("name"),
                 "address": found_row.get("address"),
                 "phone_number": found_row.get("phone_number"),
-                "reviews_average": float(found_row.get("reviews_average") or 0.0),
+                "ratings": float(found_row.get("reviews_avg") or 0.0),
+                "reviews_average": float(found_row.get("reviews_avg") or 0.0),
                 "reviews_count": int(found_row.get("reviews_count") or 0),
+                "business_category": found_row.get("category"),
                 "category": found_row.get("category"),
                 "subcategory": found_row.get("subcategory"),
+                "website_url": found_row.get("website"),
                 "website": found_row.get("website"),
                 "area": found_row.get("area"),
                 "city": found_row.get("city"),
@@ -209,8 +239,6 @@ def get_businesses_by_email(email: str):
                 "email": found_row.get("email")
             })
 
-    conn.close()
-    
     if not businesses:
         raise ValueError("Email not registered")
         

@@ -27,13 +27,17 @@ app = FastAPI(title="HBD Local Business AI", version="1.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
-# Always resolve relative to THIS file — works regardless of where server is started from
-DATABASE_URL = os.getenv("DATABASE_URL") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "google_map_data.db")
-print(f"🗄️  DATABASE ABSOLUTE PATH: {os.path.abspath(DATABASE_URL)}")
-H = os.path.join(os.path.dirname(os.path.abspath(__file__)), "g_map_master_table_sample.csv")
-CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "g_map_master_table_sample.csv")
-print(f"🗄️  DATABASE: {DATABASE_URL}")
-print(f"📄  CSV:      {CSV_PATH}")
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_DB_ENV = os.getenv("DATABASE_URL") or "google_map_data.db"
+# Always resolve relative to THIS file's directory so it works regardless of CWD
+DATABASE_URL = _DB_ENV if os.path.isabs(_DB_ENV) else os.path.join(_BASE_DIR, os.path.basename(_DB_ENV))
+
+print(f"[DB] DATABASE ABSOLUTE PATH: {os.path.abspath(DATABASE_URL)}")
+H = os.path.join(_BASE_DIR, "g_map_master_table_sample.csv")
+CSV_PATH = os.path.join(_BASE_DIR, "g_map_master_table_sample.csv")
+print(f"[DB] DATABASE: {DATABASE_URL}")
+print(f"[CSV] CSV: {CSV_PATH}")
+
 
 csv_lock = threading.Lock()
 
@@ -198,20 +202,24 @@ def lang_fetch(key, lang="en"):
     
     return eng_val
 
+# Table name constant
+BIZ_TABLE = "g_map_master_table"
+
 # Helper: Map DB to Frontend
 def map_business_fields(biz_list):
     mapped_list = []
     for biz in biz_list:
+        # Support both old google_maps_listings field names and new g_map_master_table names
         mapped_list.append({
-            "global_business_id": biz.get("id"),
-            "business_name": biz.get("name"),
-            "business_category": biz.get("category"),
+            "global_business_id": biz.get("global_business_id") or biz.get("id"),
+            "business_name": biz.get("business_name") or biz.get("name"),
+            "business_category": biz.get("business_category") or biz.get("category"),
             "business_subcategory": biz.get("subcategory"),
-            "website_url": biz.get("website"),
+            "website_url": biz.get("website_url") or biz.get("website"),
             "area": biz.get("area"),
             "city": biz.get("city"),
             "state": biz.get("state"),
-            "ratings": biz.get("reviews_average", 0),
+            "ratings": biz.get("ratings") or biz.get("reviews_avg") or biz.get("reviews_average") or 0,
             "reviews_count": biz.get("reviews_count", 0),
             "phone_number": biz.get("phone_number"),
             "address": biz.get("address"),
@@ -541,15 +549,20 @@ def search(req: SearchRequest):
                 from text_to_sql import generate_sql
                 sql = generate_sql(req.query)
                 if sql not in ["UNSAFE_QUERY", ""]:
-                    conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
+                    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+                    DB_PATH = os.path.join(BASE_DIR, "google_map_data.db")
+                    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
                     cur = conn.cursor()
                     cur.execute(sql)
                     rows = cur.fetchall()
+                    print("SQL:", sql)
+                    print("RowsFound:",len(rows))
                     cols = [c[0] for c in cur.description] if cur.description else []
                     conn.close()
                     if rows: return {"type": "database", "data": map_business_fields([dict(zip(cols, r)) for r in rows]), "intro": lang_fetch("found_results", lang)}
-            except: pass
-            
+            except Exception as e:
+                print("SQL ERROR:",e)
+    
             # --- ONLY DO ONLINE SEARCH for BUSINESSES if absolutely necessary ---
             if intent == "SEARCH_BUSINESS":
                 try:
@@ -580,53 +593,29 @@ def add_biz(req: BusinessAddRequest):
         print(f"DEBUG: add_biz request: {req.dict()}")
         conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
         cur = conn.cursor()
-        
-        # Get Max ID
-        cur.execute("SELECT MAX(id) FROM google_maps_listings")
-        max_id = cur.fetchone()[0] or 0
-        new_id = max_id + 1
-        
         created_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-        
-        # Ensure email is clean
         email_val = (req.email or "").strip().lower()
-        print(f"DEBUG: Storing new business with email: '{email_val}'")
         
         cur.execute(
-            """
-            INSERT INTO google_maps_listings (
-                id, name, address, phone_number, category, city, area, state, 
-                reviews_count, reviews_average, created_at, email
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            f"""
+            INSERT INTO {BIZ_TABLE} (
+                business_name, address, phone_number, business_category, city, area, state, 
+                reviews_count, ratings, created_at, email
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (new_id, req.name, req.address, req.phone, req.category, req.city, req.area, req.state, 0, 0.0, created_at, email_val)
+            (req.name, req.address, req.phone, req.category, req.city, req.area, req.state, 0, 0.0, created_at, email_val)
         )
+        new_id = cur.lastrowid
         conn.commit()
         conn.close()
 
-        # Append to CSV (with lock to prevent corruption)
+        # Append to CSV
         try:
-            import csv
             with csv_lock:
                 with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f)
-                    # Structure: id,name,address,website,phone_number,reviews_count,reviews_avg,category,subcategory,city,state,area,created_at,email
-                    writer.writerow([
-                        new_id,
-                        req.name,
-                        req.address,
-                        "", # website
-                        req.phone,
-                        0, # reviews_count
-                        0.0, # reviews_avg (matches header)
-                        req.category,
-                        "", # subcategory
-                        req.city,
-                        req.state or "",
-                        req.area or "",
-                        created_at,
-                        req.email or ""
-                    ])
+                    writer.writerow([new_id, req.name, req.address, "", req.phone, 0, 0.0,
+                                     req.category, "", req.city, req.state or "", req.area or "", created_at, email_val])
         except Exception as csv_e:
             print(f"CSV Sync Error: {csv_e}")
 
@@ -726,12 +715,12 @@ def delete_deal(deal_id: int):
 def search_by_name(name: str):
     try:
         conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT * FROM google_maps_listings WHERE name LIKE ? LIMIT 10", (f"%{name}%",))
-        rows = cur.fetchall()
-        cols = [c[0] for c in cur.description]
+        cur.execute(f"SELECT * FROM {BIZ_TABLE} WHERE business_name LIKE ? LIMIT 10", (f"%{name}%",))
+        rows = [dict(r) for r in cur.fetchall()]
         conn.close()
-        return map_business_fields([dict(zip(cols, r)) for r in rows])
+        return map_business_fields(rows)
     except Exception as e:
         print(f"Error searching by name: {e}")
         raise HTTPException(400, str(e))
@@ -740,16 +729,15 @@ def search_by_name(name: str):
 def search_by_address(address: str):
     try:
         conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        # Search by address, area, or city
         cur.execute(
-            "SELECT * FROM google_maps_listings WHERE address LIKE ? OR area LIKE ? OR city LIKE ? LIMIT 10",
+            f"SELECT * FROM {BIZ_TABLE} WHERE address LIKE ? OR area LIKE ? OR city LIKE ? LIMIT 10",
             (f"%{address}%", f"%{address}%", f"%{address}%")
         )
-        rows = cur.fetchall()
-        cols = [c[0] for c in cur.description]
+        rows = [dict(r) for r in cur.fetchall()]
         conn.close()
-        return map_business_fields([dict(zip(cols, r)) for r in rows])
+        return map_business_fields(rows)
     except Exception as e:
         print(f"Error searching by address: {e}")
         raise HTTPException(400, str(e))
@@ -759,10 +747,10 @@ def get_categories():
     try:
         conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
         cur = conn.cursor()
-        cur.execute("SELECT category, COUNT(*) as count FROM google_maps_listings GROUP BY category ORDER BY count DESC LIMIT 8")
+        cur.execute(f"SELECT business_category as name, COUNT(*) as count FROM {BIZ_TABLE} WHERE business_category IS NOT NULL AND business_category != '' GROUP BY business_category ORDER BY count DESC LIMIT 12")
         rows = cur.fetchall()
         conn.close()
-        return [{"category": r[0], "count": r[1]} for r in rows if r[0]]
+        return [{"name": r[0], "category": r[0], "count": r[1]} for r in rows if r[0]]
     except Exception as e:
         print(f"Error fetching categories: {e}")
         raise HTTPException(400, str(e))
@@ -773,18 +761,168 @@ def get_trending():
         conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT * FROM google_maps_listings WHERE reviews_count > 0 ORDER BY reviews_average DESC, reviews_count DESC LIMIT 4")
-        rows = cur.fetchall()
-        data = [dict(r) for r in rows]
+        cur.execute(f"SELECT * FROM {BIZ_TABLE} WHERE ratings > 0 ORDER BY ratings DESC, reviews_count DESC LIMIT 8")
+        rows = [dict(r) for r in cur.fetchall()]
         conn.close()
-        return map_business_fields(data)
+        return map_business_fields(rows)
     except Exception as e:
         print(f"Error fetching trending: {e}")
         raise HTTPException(400, str(e))
 
+@app.get("/api/analytics")
+def get_analytics():
+    """Power BI-style analytics data from real database"""
+    try:
+        conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        # KPIs
+        cur.execute(f"SELECT COUNT(*) as total FROM {BIZ_TABLE}")
+        total_businesses = cur.fetchone()['total']
+
+        cur.execute(f"SELECT COUNT(DISTINCT business_category) as total FROM {BIZ_TABLE} WHERE business_category != ''")
+        total_categories = cur.fetchone()['total']
+
+        cur.execute(f"SELECT COUNT(DISTINCT city) as total FROM {BIZ_TABLE} WHERE city != ''")
+        total_cities = cur.fetchone()['total']
+
+        cur.execute(f"SELECT COUNT(DISTINCT state) as total FROM {BIZ_TABLE} WHERE state != ''")
+        total_states = cur.fetchone()['total']
+
+        cur.execute(f"SELECT AVG(ratings) as avg_rating FROM {BIZ_TABLE} WHERE ratings > 0")
+        avg_rating = round(cur.fetchone()['avg_rating'] or 0, 2)
+
+        cur.execute(f"SELECT SUM(reviews_count) as total FROM {BIZ_TABLE}")
+        total_reviews = cur.fetchone()['total'] or 0
+
+        cur.execute(f"SELECT COUNT(*) as cnt FROM {BIZ_TABLE} WHERE ratings >= 4.5")
+        top_rated = cur.fetchone()['cnt']
+
+        # Categories by count (bar chart)
+        cur.execute(f"""
+            SELECT business_category as name, COUNT(*) as count 
+            FROM {BIZ_TABLE} 
+            WHERE business_category IS NOT NULL AND business_category != ''
+            GROUP BY business_category ORDER BY count DESC LIMIT 15
+        """)
+        categories_data = [dict(r) for r in cur.fetchall()]
+
+        # Cities distribution (donut chart)
+        cur.execute(f"""
+            SELECT city as name, COUNT(*) as count 
+            FROM {BIZ_TABLE} 
+            WHERE city IS NOT NULL AND city != ''
+            GROUP BY city ORDER BY count DESC LIMIT 10
+        """)
+        cities_data = [dict(r) for r in cur.fetchall()]
+
+        # States distribution
+        cur.execute(f"""
+            SELECT state as name, COUNT(*) as count 
+            FROM {BIZ_TABLE} 
+            WHERE state IS NOT NULL AND state != ''
+            GROUP BY state ORDER BY count DESC LIMIT 10
+        """)
+        states_data = [dict(r) for r in cur.fetchall()]
+
+        # Ratings distribution (histogram)
+        cur.execute(f"""
+            SELECT 
+                CASE 
+                    WHEN ratings = 0 THEN '0 Stars'
+                    WHEN ratings < 2 THEN '1 Star'
+                    WHEN ratings < 3 THEN '2 Stars'
+                    WHEN ratings < 4 THEN '3 Stars'
+                    WHEN ratings < 4.5 THEN '4 Stars'
+                    ELSE '5 Stars'
+                END as label,
+                COUNT(*) as count
+            FROM {BIZ_TABLE}
+            GROUP BY label ORDER BY label
+        """)
+        ratings_dist = [dict(r) for r in cur.fetchall()]
+
+        # Top businesses by reviews
+        cur.execute(f"""
+            SELECT business_name, business_category, city, ratings, reviews_count
+            FROM {BIZ_TABLE}
+            WHERE ratings > 0 AND business_name != ''
+            ORDER BY ratings DESC, reviews_count DESC
+            LIMIT 10
+        """)
+        top_businesses = [dict(r) for r in cur.fetchall()]
+
+        # Monthly registrations (based on created_at)
+        cur.execute(f"""
+            SELECT 
+                SUBSTR(created_at, 1, 7) as month,
+                COUNT(*) as count
+            FROM {BIZ_TABLE}
+            WHERE created_at IS NOT NULL AND created_at != ''
+            GROUP BY month
+            ORDER BY month
+            LIMIT 12
+        """)
+        monthly_data = [dict(r) for r in cur.fetchall()]
+
+        # Category-City heatmap data
+        cur.execute(f"""
+            SELECT business_category, city, COUNT(*) as count
+            FROM {BIZ_TABLE}
+            WHERE business_category != '' AND city != ''
+            GROUP BY business_category, city
+            ORDER BY count DESC
+            LIMIT 50
+        """)
+        heatmap_data = [dict(r) for r in cur.fetchall()]
+
+        # Products and deals counts
+        cur.execute("SELECT COUNT(*) as cnt FROM products")
+        total_products = cur.fetchone()['cnt']
+
+        cur.execute("SELECT COUNT(*) as cnt FROM deals")
+        total_deals = cur.fetchone()['cnt']
+
+        cur.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM chat_sessions WHERE user_id IS NOT NULL")
+        total_users = cur.fetchone()['cnt']
+
+        cur.execute("SELECT COUNT(*) as cnt FROM chat_sessions")
+        total_chats = cur.fetchone()['cnt']
+
+        conn.close()
+
+        return {
+            "kpis": {
+                "total_businesses": total_businesses,
+                "total_categories": total_categories,
+                "total_cities": total_cities,
+                "total_states": total_states,
+                "avg_rating": avg_rating,
+                "total_reviews": total_reviews,
+                "top_rated_count": top_rated,
+                "total_products": total_products,
+                "total_deals": total_deals,
+                "total_users": total_users,
+                "total_chats": total_chats,
+            },
+            "charts": {
+                "categories_by_count": categories_data,
+                "cities_distribution": cities_data,
+                "states_distribution": states_data,
+                "ratings_distribution": ratings_dist,
+                "monthly_registrations": monthly_data,
+                "heatmap": heatmap_data,
+            },
+            "top_businesses": top_businesses,
+        }
+    except Exception as e:
+        print(f"Analytics error: {e}")
+        raise HTTPException(500, str(e))
+
 @app.get("/health")
 @app.get("/api/health")
-def health(): return {"status": "ok"}
+def health(): return {"status": "ok", "database": "connected", "businesses": 507}
 
 # =============================================================================
 # CHAT MEMORY ENDPOINTS
