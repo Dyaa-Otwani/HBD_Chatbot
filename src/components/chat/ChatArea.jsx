@@ -57,6 +57,12 @@ const ChatArea = (props) => {
   const [showLoginPopup, setShowLoginPopup] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [backendHealth, setBackendHealth] = useState('checking');
+  const [autocompleteOptions, setAutocompleteOptions] = useState([]);
+  const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const [compareList, setCompareList] = useState([]);
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const [comparisonData, setComparisonData] = useState([]);
+  const [isComparingLoading, setIsComparingLoading] = useState(false);
   const [thinkingStatus, setThinkingStatus] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef(null);
@@ -102,6 +108,44 @@ const ChatArea = (props) => {
       ]);
     }
   }, [currentLanguage]);
+
+  // Autocomplete debounce effect
+  useEffect(() => {
+    if (!inputText.trim()) {
+      setAutocompleteOptions([]);
+      return;
+    }
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const res = await api.getAiSuggestions(inputText, currentLanguage, "QUERY");
+        if (res && res.suggestions) {
+          setAutocompleteOptions(res.suggestions);
+        }
+      } catch (err) {
+        console.error("Autocomplete error:", err);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounce);
+  }, [inputText, currentLanguage]);
+
+  const handleCompareSubmit = async () => {
+    if (compareList.length < 2) {
+      toast?.warning("Select at least 2 businesses to compare");
+      return;
+    }
+    setIsCompareOpen(true);
+    setIsComparingLoading(true);
+    try {
+      const ids = compareList.map(b => b.global_business_id);
+      const data = await api.compareBusinesses(ids);
+      setComparisonData(data);
+    } catch (err) {
+      toast?.error("Failed to fetch comparison data");
+      setIsCompareOpen(false);
+    } finally {
+      setIsComparingLoading(false);
+    }
+  };
 
   // ── AUTO SESSION ON LOGIN ─────────────────────────────
   useEffect(() => {
@@ -418,6 +462,16 @@ const ChatArea = (props) => {
       setThinkingStatus('');
       removeThinking();
 
+      // Re-fetch chat list to update sidebar titles in real-time
+      if (setChatList && activeSessionId) {
+        const uId = getUserId();
+        if (uId) {
+          api.listChatSessions(uId)
+            .then(list => setChatList(Array.isArray(list) ? list : []))
+            .catch(err => console.error("Error updating sidebar list:", err));
+        }
+      }
+
       const responseType = data.type || 'text';
       if (responseType === 'command') { handleAction(data.command); return; }
 
@@ -484,6 +538,25 @@ const ChatArea = (props) => {
 
     if (action === 'next_option' || action === 'prev_option' || action === 'filter_area' || action === 'filter_rating' || action === 'search_another') {
       handleSend(null, payload);
+      return;
+    }
+
+    if (action === 'toggle_compare') {
+      const biz = payload;
+      setCompareList(prev => {
+        const exists = prev.some(c => Number(c.global_business_id) === Number(biz.global_business_id));
+        if (exists) {
+          toast?.info(`${biz.business_name} removed from comparison`);
+          return prev.filter(c => Number(c.global_business_id) !== Number(biz.global_business_id));
+        } else {
+          if (prev.length >= 3) {
+            toast?.warning("You can compare up to 3 businesses at a time");
+            return prev;
+          }
+          toast?.success(`${biz.business_name} added to comparison`);
+          return [...prev, biz];
+        }
+      });
       return;
     }
 
@@ -864,9 +937,54 @@ const ChatArea = (props) => {
                 isLoggedIn={isLoggedIn}
                 session={session}
                 language={currentLanguage}
+                compareList={compareList}
               />
             ))}
-            {isThinking && <TypingIndicator status={thinkingStatus} />}
+            {isThinking && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <TypingIndicator status={thinkingStatus} />
+                
+                {/* Shimmering Skeleton Loader for Business Cards */}
+                {(thinkingStatus.includes('Scraping') || thinkingStatus.includes('Searching')) && (
+                  <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', 
+                    gap: 14, 
+                    width: '100%',
+                    marginTop: 4,
+                    animation: 'scaleIn 200ms ease'
+                  }}>
+                    {[...Array(3)].map((_, idx) => (
+                      <div key={idx} style={{
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-lg)',
+                        height: 180,
+                        padding: 14,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 10,
+                        overflow: 'hidden',
+                        position: 'relative'
+                      }}>
+                        {/* Title shimmer */}
+                        <div style={{ height: 16, width: '70%', background: 'var(--bg-surface-2)', borderRadius: 4 }} className="shimmer" />
+                        {/* Subtitle shimmer */}
+                        <div style={{ height: 12, width: '40%', background: 'var(--bg-surface-2)', borderRadius: 4 }} className="shimmer" />
+                        {/* Address shimmer */}
+                        <div style={{ height: 10, width: '90%', background: 'var(--bg-surface-2)', borderRadius: 4, marginTop: 'auto' }} className="shimmer" />
+                        {/* Actions row shimmer */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, borderTop: '1px solid var(--border-subtle)', paddingTop: 10 }}>
+                          {[...Array(4)].map((_, i) => (
+                            <div key={i} style={{ height: 20, borderRadius: 6, background: 'var(--bg-surface-2)' }} className="shimmer" />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
         <div ref={messagesEndRef} />
@@ -1029,6 +1147,189 @@ const ChatArea = (props) => {
         />
       )}
 
+
+      {/* Sticky Comparison Bar at Bottom */}
+      {compareList.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          bottom: 76,
+          left: 16,
+          right: 16,
+          background: 'rgba(79, 70, 229, 0.95)',
+          backdropFilter: 'blur(8px)',
+          borderRadius: 'var(--radius-lg)',
+          padding: '10px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          color: 'white',
+          boxShadow: '0 4px 20px rgba(79, 70, 229, 0.35)',
+          zIndex: 80,
+          animation: 'slideUp 200ms ease'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16 }}>📊</span>
+            <span style={{ fontSize: '0.8125rem', fontWeight: 700 }}>
+              Compare Businesses ({compareList.length} selected)
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button 
+              onClick={() => setCompareList([])}
+              style={{
+                background: 'transparent', border: '1px solid rgba(255,255,255,0.4)',
+                color: 'white', padding: '4px 10px', borderRadius: 6, fontSize: '0.75rem',
+                fontWeight: 600, cursor: 'pointer'
+              }}
+            >
+              Clear
+            </button>
+            <button 
+              onClick={handleCompareSubmit}
+              disabled={compareList.length < 2}
+              style={{
+                background: 'white', border: 'none', color: 'var(--color-primary)',
+                padding: '4px 12px', borderRadius: 6, fontSize: '0.75rem',
+                fontWeight: 700, cursor: compareList.length < 2 ? 'not-allowed' : 'pointer',
+                opacity: compareList.length < 2 ? 0.6 : 1
+              }}
+            >
+              Compare Now
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Comparison Drawer / Modal */}
+      {isCompareOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+          padding: 16, animation: 'fadeIn 200ms ease'
+        }}>
+          <div style={{
+            background: 'var(--bg-surface)',
+            width: '100%',
+            maxWidth: 800,
+            maxHeight: '90vh',
+            borderRadius: 'var(--radius-xl)',
+            boxShadow: 'var(--shadow-xl)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            animation: 'scaleIn 250ms ease'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid var(--border-subtle)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                📊 Side-by-Side Business Comparison
+              </h3>
+              <button 
+                onClick={() => setIsCompareOpen(false)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body / Table */}
+            <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+              {isComparingLoading ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                  <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 10px' }} />
+                  <p style={{ fontSize: '0.875rem' }}>Loading comparison details...</p>
+                </div>
+              ) : comparisonData.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                  No comparison data available.
+                </div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border-subtle)' }}>
+                      <th style={{ padding: '10px 8px', fontWeight: 700, width: '25%' }}>Features</th>
+                      {comparisonData.map((biz, idx) => (
+                        <th key={idx} style={{ padding: '10px 8px', fontWeight: 800, color: 'var(--color-primary)' }}>
+                          {biz.business_name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td style={{ padding: '10px 8px', fontWeight: 600, color: 'var(--text-secondary)' }}>Category</td>
+                      {comparisonData.map((biz, idx) => (
+                        <td key={idx} style={{ padding: '10px 8px' }}>
+                          <span className="badge badge-primary" style={{ fontSize: '0.625rem' }}>
+                            {biz.business_category}
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td style={{ padding: '10px 8px', fontWeight: 600, color: 'var(--text-secondary)' }}>Rating</td>
+                      {comparisonData.map((biz, idx) => (
+                        <td key={idx} style={{ padding: '10px 8px', fontWeight: 700, color: '#f59e0b' }}>
+                          ★ {Number(biz.ratings).toFixed(1)} ({biz.reviews_count} reviews)
+                        </td>
+                      ))}
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td style={{ padding: '10px 8px', fontWeight: 600, color: 'var(--text-secondary)' }}>Address</td>
+                      {comparisonData.map((biz, idx) => (
+                        <td key={idx} style={{ padding: '10px 8px', color: 'var(--text-secondary)', lineHeight: 1.3 }}>
+                          {biz.area ? `${biz.area}, ` : ''}{biz.address}, {biz.city}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td style={{ padding: '10px 8px', fontWeight: 600, color: 'var(--text-secondary)' }}>Phone</td>
+                      {comparisonData.map((biz, idx) => (
+                        <td key={idx} style={{ padding: '10px 8px' }}>
+                          {biz.phone_number ? <a href={`tel:${biz.phone_number}`} style={{ color: 'var(--color-primary)', textDecoration: 'none' }}>{biz.phone_number}</a> : "N/A"}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td style={{ padding: '10px 8px', fontWeight: 600, color: 'var(--text-secondary)' }}>Website</td>
+                      {comparisonData.map((biz, idx) => (
+                        <td key={idx} style={{ padding: '10px 8px' }}>
+                          {biz.website_url ? <a href={biz.website_url.startsWith('http') ? biz.website_url : `https://${biz.website_url}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-primary)', textDecoration: 'none' }}>Visit site</a> : "N/A"}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td style={{ padding: '10px 8px', fontWeight: 600, color: 'var(--text-secondary)' }}>Active Deals</td>
+                      {comparisonData.map((biz, idx) => (
+                        <td key={idx} style={{ padding: '10px 8px' }}>
+                          {biz.deals && biz.deals.length > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              {biz.deals.map((d, didx) => (
+                                <div key={didx} style={{ background: '#fce7f3', color: '#be185d', padding: '2px 6px', borderRadius: 4, fontSize: '0.6875rem', fontWeight: 700 }}>
+                                  🏷️ {d.discount_pct}% OFF: {d.title}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>No active deals</span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── RESET CONFIRMATION ────────────────────── */}
       {showResetConfirm && (
         <>

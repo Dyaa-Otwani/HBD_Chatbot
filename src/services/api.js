@@ -125,6 +125,28 @@ export const api = {
   // ── HEALTH ────────────────────────────────────────────────────────────
   checkHealth: () =>
     fetch('/api/health').then(handleResponse),
+
+  // ── BOOKMARKS ─────────────────────────────────────────────────────────
+  addBookmark: (userId, businessId) => fetch('/api/bookmarks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, business_id: businessId })
+  }).then(handleResponse),
+
+  getBookmarks: (userId) =>
+    fetch(`/api/bookmarks?user_id=${encodeURIComponent(userId)}`).then(handleResponse),
+
+  deleteBookmark: (businessId, userId) =>
+    fetch(`/api/bookmarks/${businessId}?user_id=${encodeURIComponent(userId)}`, {
+      method: 'DELETE'
+    }).then(handleResponse),
+
+  // ── COMPARE ───────────────────────────────────────────────────────────
+  compareBusinesses: (businessIds) => fetch('/api/business/compare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ business_ids: businessIds })
+  }).then(handleResponse),
 };
 
 export default api;
