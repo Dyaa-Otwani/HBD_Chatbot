@@ -27,6 +27,7 @@ export function useChatMemory({ session, toast }) {
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardData, setWizardData] = useState({});
   const [pendingUpdateField, setPendingUpdateField] = useState(null);
+  const [syncedUserId, setSyncedUserId] = useState(null);
 
   const getUserId = useCallback(() => session.phone || session.email || guestUserId, [session, guestUserId]);
 
@@ -45,12 +46,8 @@ export function useChatMemory({ session, toast }) {
   // Synchronize guest chats to user account on login
   const handleSyncGuestChats = useCallback(async (registeredUserId) => {
     try {
-      const res = await fetch('/api/chats/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guest_user_id: guestUserId, user_id: registeredUserId })
-      }).then(r => r.json());
-      
+      const res = await api.syncChats(guestUserId, registeredUserId);
+
       const list = await api.listChatSessions(registeredUserId);
       setChatList(Array.isArray(list) ? list : []);
       if (res && res.success && res.count > 0) {
@@ -64,9 +61,16 @@ export function useChatMemory({ session, toast }) {
   useEffect(() => {
     const userId = session.phone || session.email;
     if (userId) {
-      handleSyncGuestChats(userId);
+      if (userId !== syncedUserId) {
+        setSyncedUserId(userId);
+        handleSyncGuestChats(userId);
+      }
+    } else {
+      if (syncedUserId !== null) {
+        setSyncedUserId(null);
+      }
     }
-  }, [session, handleSyncGuestChats]);
+  }, [session, syncedUserId, handleSyncGuestChats]);
 
   // Handlers
   const startNewSession = useCallback(async () => {
