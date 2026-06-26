@@ -81,7 +81,7 @@ const ChatArea = (props) => {
   // ── HOOKS ─────────────────────────────────────────────
   const wizards = useChatWizards({
     session, currentLanguage, setLocalMessages, addThinking, removeThinking,
-    setSession, setQuickActionsView: () => {},
+    setSession, setIsLoggedIn, setQuickActionsView: () => {},
     flowMode, setFlowMode,
     wizardStep, setWizardStep,
     wizardData, setWizardData,
@@ -207,6 +207,10 @@ const ChatArea = (props) => {
   // ── INITIAL QUERY ─────────────────────────────────────
   useEffect(() => {
     if (initialQuery) {
+      setFlowMode('QUERY');
+      setWizardStep(0);
+      setWizardData({});
+      setPendingUpdateField(null);
       handleSend(null, initialQuery);
       onClearInitialQuery?.();
     }
@@ -382,7 +386,12 @@ const ChatArea = (props) => {
       const trans = UI_TRANSLATIONS[currentLanguage || 'en'] || UI_TRANSLATIONS.en;
       if (res.status === 'logged_in' && res.businesses?.length) {
         const biz = res.businesses[0];
-        const sessionData = { type: 'BUSINESS', businessId: biz.global_business_id, city: biz.city };
+        const sessionData = { 
+          type: 'BUSINESS', 
+          businessId: biz.global_business_id, 
+          businessName: biz.business_name,
+          city: biz.city 
+        };
         if (method === 'phone') sessionData.phone = identifier;
         else { sessionData.email = identifier; if (biz.phone_number) sessionData.phone = biz.phone_number; }
         setSession(sessionData);
@@ -517,6 +526,14 @@ const ChatArea = (props) => {
 
   // ── ACTION HANDLER ────────────────────────────────────
   const handleAction = async (action, payload) => {
+    // Reset wizard states if starting a new top-level action
+    if (['search', 'update', 'add_new_business', 'search_method', 'search_by_name', 'search_by_address', 'start_add_product', 'start_add_deal', 'reset_chat', 'login_trigger'].includes(action)) {
+      setFlowMode('QUERY');
+      setWizardStep(0);
+      setWizardData({});
+      setPendingUpdateField(null);
+    }
+
     const lang = currentLanguage || 'en';
     const trans = UI_TRANSLATIONS[lang] || UI_TRANSLATIONS.en;
 
@@ -990,43 +1007,7 @@ const ChatArea = (props) => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── QUICK ACTION CHIPS (logged in business) ── */}
-      {isLoggedIn && session.businessId && flowMode === 'QUERY' && (
-        <div style={{
-          padding: '8px 12px',
-          background: 'var(--bg-surface)',
-          borderTop: '1px solid var(--border-subtle)',
-          display: 'flex',
-          gap: 6,
-          overflowX: 'auto',
-          flexShrink: 0,
-        }}
-          className="no-scrollbar"
-        >
-          {[
-            { label: 'Add Product', action: 'start_add_product', emoji: '📦' },
-            { label: 'Add Deal', action: 'start_add_deal', emoji: '🏷️' },
-            { label: 'My Products', action: 'manage_products', emoji: '📋' },
-            { label: 'My Deals', action: 'manage_deals', emoji: '🔥' },
-          ].map(chip => (
-            <button
-              key={chip.action}
-              onClick={() => handleAction(chip.action)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px',
-                background: 'var(--bg-surface-2)', border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-full)', cursor: 'pointer', fontSize: '0.75rem',
-                fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap',
-                transition: 'all var(--transition-fast)',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.color = 'var(--color-primary)'; e.currentTarget.style.background = 'var(--color-primary-light)'; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.background = 'var(--bg-surface-2)'; }}
-            >
-              {chip.emoji} {chip.label}
-            </button>
-          ))}
-        </div>
-      )}
+
 
       {/* ── INPUT BAR ─────────────────────────────── */}
       {flowMode === 'ADD_PRODUCT' && wizardStep === 4 ? (

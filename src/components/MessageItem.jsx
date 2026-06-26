@@ -2,10 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Search, RefreshCw, LogIn, MessageSquare, AlertCircle, X, ArrowRight,
   TrendingUp, ChevronRight, ChevronLeft, PlusCircle, MapPin, Type, Trash2,
-  Star, Phone, Globe, Copy, Check, ExternalLink, Share2, Bookmark, Clock, Compass
+  Star, Phone, Globe, Copy, Check, ExternalLink, Share2, Bookmark, Clock, Compass,
+  Package, Tag
 } from 'lucide-react';
 import api from '../services/api';
 import ReviewSection from './ReviewSection';
+import DealsAndProductsSection from './DealsAndProductsSection';
 
 // Safe inline markdown renderer (no dangerouslySetInnerHTML)
 function MarkdownText({ text }) {
@@ -254,6 +256,7 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
   const [showReviews, setShowReviews] = useState(false);
   const [localRatings, setLocalRatings] = useState(biz.ratings);
   const [localReviewsCount, setLocalReviewsCount] = useState(biz.reviews_count);
+  const [showDealsAndProducts, setShowDealsAndProducts] = useState(false);
 
   const isComparing = compareList && biz.global_business_id && compareList.some(c => c.global_business_id && Number(c.global_business_id) === Number(biz.global_business_id));
 
@@ -538,36 +541,56 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
           </button>
         </div>
         
-        {/* Reviews Toggle Button */}
-        <button
-          onClick={(e) => { e.stopPropagation(); setShowReviews(!showReviews); }}
-          style={{
-            marginTop: 10,
-            width: '100%',
-            padding: '8px 10px',
-            background: showReviews ? 'var(--color-primary)' : 'var(--bg-surface-2)',
-            color: showReviews ? '#fff' : 'var(--text-secondary)',
-            border: `1px solid ${showReviews ? 'var(--color-primary)' : 'var(--border-subtle)'}`,
-            borderRadius: 8,
-            fontSize: '0.75rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            transition: 'all 150ms ease'
-          }}
-          onMouseEnter={e => {
-            if (!showReviews) e.currentTarget.style.background = 'var(--bg-surface)';
-          }}
-          onMouseLeave={e => {
-            if (!showReviews) e.currentTarget.style.background = 'var(--bg-surface-2)';
-          }}
-        >
-          <Star size={14} fill={showReviews ? "#fff" : "none"} />
-          {showReviews ? 'Hide Reviews' : 'Reviews & Ratings'}
-        </button>
+        {/* Tab Buttons */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+          {/* Reviews Toggle Button */}
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowReviews(!showReviews); setShowDealsAndProducts(false); }}
+            style={{
+              flex: 1,
+              padding: '8px 10px',
+              background: showReviews ? 'var(--color-primary)' : 'var(--bg-surface-2)',
+              color: showReviews ? '#fff' : 'var(--text-secondary)',
+              border: `1px solid ${showReviews ? 'var(--color-primary)' : 'var(--border-subtle)'}`,
+              borderRadius: 8,
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              transition: 'all 150ms ease'
+            }}
+          >
+            <Star size={14} fill={showReviews ? "#fff" : "none"} />
+            {showReviews ? 'Hide Reviews' : 'Reviews'}
+          </button>
+
+          {/* Catalog & Deals Toggle Button */}
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowDealsAndProducts(!showDealsAndProducts); setShowReviews(false); }}
+            style={{
+              flex: 1,
+              padding: '8px 10px',
+              background: showDealsAndProducts ? 'var(--color-primary)' : 'var(--bg-surface-2)',
+              color: showDealsAndProducts ? '#fff' : 'var(--text-secondary)',
+              border: `1px solid ${showDealsAndProducts ? 'var(--color-primary)' : 'var(--border-subtle)'}`,
+              borderRadius: 8,
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              transition: 'all 150ms ease'
+            }}
+          >
+            <Tag size={14} />
+            {showDealsAndProducts ? 'Hide Deals' : 'Deals & Catalog'}
+          </button>
+        </div>
 
         {showReviews && (
           <ReviewSection 
@@ -582,33 +605,108 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
             }}
           />
         )}
+
+        {showDealsAndProducts && (
+          <DealsAndProductsSection 
+            businessId={biz.global_business_id}
+          />
+        )}
       </div>
 
       {isOwner && (
-        <div style={{ padding: '0 14px 10px', background: 'var(--bg-surface-2)' }}>
-          <button
-            onClick={() => onAction('delete_business', biz.global_business_id)}
-            style={{
-              width: '100%',
-              padding: '5px 10px',
-              borderRadius: 6,
-              border: '1px solid #fecaca',
-              background: '#fef2f2',
-              color: '#dc2626',
-              fontSize: '0.7rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 4,
-              transition: 'all 150ms ease'
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#fee2e2'; e.currentTarget.style.borderColor = '#f87171'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.borderColor = '#fecaca'; }}
-          >
-            <Trash2 size={11} /> Delete Listing
-          </button>
+        <div style={{
+          padding: '10px 14px 14px',
+          background: 'var(--bg-surface-2)',
+          borderTop: '1px solid var(--border-subtle)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8
+        }}>
+          <div style={{ fontSize: '0.725rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+            🛡️ Owner Dashboard
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <button
+              onClick={() => onAction('start_add_product')}
+              style={{
+                padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '0.75rem',
+                fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                transition: 'all 150ms ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-surface-2)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
+            >
+              📦 Add Product
+            </button>
+            <button
+              onClick={() => onAction('start_add_deal')}
+              style={{
+                padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '0.75rem',
+                fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                transition: 'all 150ms ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-surface-2)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
+            >
+              🏷️ Add Deal
+            </button>
+            <button
+              onClick={() => onAction('manage_products')}
+              style={{
+                padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '0.75rem',
+                fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                transition: 'all 150ms ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-surface-2)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
+            >
+              📋 Manage Products
+            </button>
+            <button
+              onClick={() => onAction('manage_deals')}
+              style={{
+                padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '0.75rem',
+                fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                transition: 'all 150ms ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-surface-2)'; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-surface)'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
+            >
+              🔥 Manage Deals
+            </button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+            <button
+              onClick={() => onAction('update')}
+              style={{
+                padding: '7px 8px', borderRadius: 8, border: '1px solid #a7f3d0',
+                background: '#ecfdf5', color: '#047857', fontSize: '0.75rem',
+                fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                transition: 'all 150ms ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#d1fae5'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#ecfdf5'; }}
+            >
+              🔄 Update Business
+            </button>
+            <button
+              onClick={() => onAction('delete_business', biz.global_business_id)}
+              style={{
+                padding: '7px 8px', borderRadius: 8, border: '1px solid #fee2e2',
+                background: '#fef2f2', color: '#dc2626', fontSize: '0.75rem',
+                fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                transition: 'all 150ms ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#fee2e2'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#fef2f2'; }}
+            >
+              🗑️ Delete Listing
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -45,7 +45,7 @@ export function useChatMemory({ session, toast }) {
   // Synchronize guest chats to user account on login
   const handleSyncGuestChats = useCallback(async (registeredUserId) => {
     try {
-      await fetch('/api/chats/sync', {
+      const res = await fetch('/api/chats/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ guest_user_id: guestUserId, user_id: registeredUserId })
@@ -53,7 +53,9 @@ export function useChatMemory({ session, toast }) {
       
       const list = await api.listChatSessions(registeredUserId);
       setChatList(Array.isArray(list) ? list : []);
-      toast?.success('Conversations imported successfully');
+      if (res && res.success && res.count > 0) {
+        toast?.success('Conversations imported successfully');
+      }
     } catch (e) {
       console.error('Error syncing guest chats:', e);
     }

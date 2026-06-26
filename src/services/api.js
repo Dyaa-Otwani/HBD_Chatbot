@@ -160,6 +160,10 @@ export const api = {
   deleteReview: (reviewId, userId) => fetch(`/api/reviews/${reviewId}?user_id=${encodeURIComponent(userId)}`, {
     method: 'DELETE'
   }).then(handleResponse),
+
+  // ── PRODUCTS & DEALS (ADS) ─────────────────────────────────────────────
+  getProducts: (businessId) => fetch(`/api/business/${businessId}/products`).then(handleResponse),
+  getDeals: (businessId) => fetch(`/api/business/${businessId}/deals`).then(handleResponse),
 };
 
 export default api;

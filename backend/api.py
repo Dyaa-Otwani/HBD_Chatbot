@@ -713,7 +713,11 @@ def extract_search_params(query_str: str):
         "atms": "atm",
         "banks": "bank",
         "resturant": "restaurant",
-        "resturants": "restaurant",
+        "resturat": "restaurant",
+        "resyurantr": "restaurant",
+        "resturats": "restaurant",
+        "restaurant": "restaurant",
+        "restaurants": "restaurant",
         "hospitall": "hospital",
         "hospitals": "hospital",
         "gyms": "gym",
@@ -986,7 +990,7 @@ async def search(req: SearchRequest):
             metadata = _get_last_search_metadata(chat_session_id)
             
         # Detect follow-up search actions
-        is_next = q_lower in ["next", "show next 10 results", "show next 5 results", "next 5", "next 5 results", "next results", "next option", "more", "/next"]
+        is_next = q_lower in ["next", "show next 10 results", "show next 5 results", "next 5", "next 10", "next 5 results", "next 10 results", "show next 10", "next results", "next option", "more", "/next"]
         is_prev = q_lower in ["prev", "previous", "previous results", "show previous 10 results", "show previous 5 results", "previous 5 results", "/prev"]
         is_filter_rating = q_lower.startswith("filter by rating:")
         is_filter_area = q_lower.startswith("filter by area:")
@@ -1073,7 +1077,7 @@ async def search(req: SearchRequest):
 
         # --- 1. MANDATORY AUTH CHECK for MY BUSINESS actions (Must run FIRST) ---
         is_my_biz_query = any(x in q_lower for x in [
-            "show my business", "show business",
+            "show my business", "show business", "my business",
             "update my business", "update business",
             "manage product", "manage products",
             "manage deal", "manage deals"
@@ -1417,7 +1421,15 @@ async def search(req: SearchRequest):
                         resp = {
                             "type": "database", 
                             "data": map_business_fields([dict(zip(cols, r)) for r in rows]), 
-                            "intro": lang_fetch("found_results", lang)
+                            "intro": lang_fetch("found_results", lang),
+                            "prompt": "Use the options below to paginate listings:",
+                            "suggestions": [
+                                {
+                                    "title": "Next 10 Results ⏭️",
+                                    "action": "next_option",
+                                    "query": "Show Next 10 Results"
+                                }
+                            ]
                         }
                         if chat_session_id:
                             _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
@@ -1430,7 +1442,19 @@ async def search(req: SearchRequest):
                     from search_online import search_online_and_save
                     online = await anyio.to_thread.run_sync(search_online_and_save, req.query)
                     if online:
-                        resp = {"type": "database", "data": map_business_fields(online), "intro": lang_fetch("found_online", lang)}
+                        resp = {
+                            "type": "database", 
+                            "data": map_business_fields(online), 
+                            "intro": lang_fetch("found_online", lang),
+                            "prompt": "Use the options below to paginate listings:",
+                            "suggestions": [
+                                {
+                                    "title": "Next 10 Results ⏭️",
+                                    "action": "next_option",
+                                    "query": "Show Next 10 Results"
+                                }
+                            ]
+                        }
                         if chat_session_id:
                             _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
                         return resp
@@ -2019,8 +2043,9 @@ def sync_guest_chats(req: ChatSyncRequest):
                 "UPDATE chat_sessions SET user_id = ?, updated_at = ? WHERE user_id = ?",
                 (req.user_id, now, req.guest_user_id)
             )
+            count = cur.rowcount
             conn.commit()
-        return {"success": True, "message": "Guest chats synchronized successfully"}
+        return {"success": True, "message": "Guest chats synchronized successfully", "count": count}
     except Exception as e:
         print(f"Error syncing guest chats: {e}")
         raise HTTPException(400, str(e))
