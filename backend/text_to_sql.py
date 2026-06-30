@@ -14,6 +14,19 @@ def generate_sql(query: str) -> str:
                 "g_map_master_table\n\n"
 
                 "COLUMNS:\n"
+                "global_business_id, csv_id,business_name, address, website_url, phone_number,\n"
+                "reviews_count, ratings,\n"
+                "business_category, subcategory, city, state, area,created_at,email\n\n"
+
+                "IMPORTANT:\n"
+                "- Use business_name instead of name.\n"
+                "- Use website_url instead of website.\n"
+                "- Use business_category instead of category.\n"
+                "- Use global_business_id instead of id.\n"
+                "- Always use the exact column names listed above.\n"
+                "- Never generate SQL using the old column names (id, name, website, or category).\n\n"
+
+                
                 "global_business_id, csv_id, business_name, address, website_url, phone_number,\n"
                 "reviews_count, ratings,\n"
                 "business_category, subcategory, city, state, area, created_at, email\n\n"

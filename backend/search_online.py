@@ -5,7 +5,7 @@ import pandas as pd
 from typing import List, Dict
 from datetime import datetime 
 import os
-import sqlite3
+from db import get_connection
 import re
 import requests
 import html
@@ -17,13 +17,13 @@ from models import MODEL
 EXCEL_FILE = "missing_data_from_db.xlsx"
 
 REQUIRED_FIELDS = {
-    "name": "",
+    "business_name": "",
     "address": "",
-    "website": "",
+    "website_url": "",
     "phone_number": "",
     "reviews_count": 0,
-    "reviews_average": 0.0,
-    "category": "",
+    "ratings": 0.0,
+    "business_category": "",
     # "subcategory": "",
     "city": "",
     "state": "",
@@ -46,7 +46,7 @@ def _normalize_results(raw: List[Dict]) -> List[Dict]:
                 except:
                     value = 0
 
-            if field == "reviews_average":
+            if field == "ratings":
                 try:
                     value = float(value)
                 except:
@@ -59,7 +59,7 @@ def _normalize_results(raw: List[Dict]) -> List[Dict]:
     return normalized
 
 def validate_business(record):
-    if not record.get("name", "").strip():
+    if not record.get("business_name", "").strip():
         return False
 
     if not record.get("address", "").strip():
@@ -68,10 +68,10 @@ def validate_business(record):
     if not record.get("city", "").strip():
         return False
 
-    if not record.get("category", "").strip():
+    if not record.get("business_category", "").strip():
         return False
 
-    if record.get("reviews_average", 0) < 0 or record.get("reviews_average", 0) > 5:
+    if record.get("ratings", 0) < 0 or record.get("ratings", 0) > 5:
         return False
 
     if record.get("reviews_count", 0) < 0:
@@ -79,22 +79,22 @@ def validate_business(record):
 
     return True
 
-def find_existing_business(cursor, name, city):
+def find_existing_business(cursor, business_name, city):
     cursor.execute(
         """
         SELECT global_business_id
         FROM g_map_master_table
-        WHERE LOWER(business_name) = ?
-        AND LOWER(city) = ?
+        WHERE LOWER(business_name) = %s
+        AND LOWER(city) = %s
         LIMIT 1
         """,
-        (name.strip().lower(), city.strip().lower())
+        (business_name.strip().lower(), city.strip().lower())
     )
 
     row = cursor.fetchone()
 
     if row:
-        return row[0]  # business id
+        return row["global_business_id"]  # business id
 
     return None
 
@@ -105,7 +105,7 @@ def update_existing_business(cursor, business_id, record):
         SELECT website_url, phone_number, reviews_count, ratings,
                city, state, area, subcategory
         FROM g_map_master_table
-        WHERE global_business_id = ?
+        WHERE id = %s
         """,
         (business_id,)
     )
@@ -115,51 +115,40 @@ def update_existing_business(cursor, business_id, record):
     if not existing:
         return
 
-    (
-        db_website,
-        db_phone,
-        db_reviews_count,
-        db_reviews_average,
-        db_city,
-        db_state,
-        db_area,
-        db_subcategory
-    ) = existing
-
     # Fill missing values only
-    website = db_website or record.get("website", "")
-    phone_number = db_phone or record.get("phone_number", "")
-    city = db_city or record.get("city", "")
-    state = db_state or record.get("state", "")
-    area = db_area or record.get("area", "")
-    subcategory = db_subcategory or record.get("subcategory", "")
+    website_url = existing["website_url"] or record.get("website_url", "")
+    phone_number = existing["phone_number"] or record.get("phone_number", "")
+    city = existing["city"] or record.get("city", "")
+    state = existing["state"] or record.get("state", "")
+    area = existing["area"] or record.get("area", "")
+    subcategory = existing["subcategory"] or record.get("subcategory", "")
 
     # Update reviews only if newer count is higher
-    reviews_count = db_reviews_count
-    reviews_average = db_reviews_average
+    reviews_count = existing["reviews_count"]
+    ratings = existing["ratings"]
 
-    if record.get("reviews_count", 0) > (db_reviews_count or 0):
+    if record.get("reviews_count", 0) > (existing["reviews_count"] or 0):
         reviews_count = record.get("reviews_count", 0)
-        reviews_average = record.get("reviews_average", 0)
+        ratings = record.get("ratings", 0)
 
     cursor.execute(
         """
         UPDATE g_map_master_table
-        SET website_url = ?,
-            phone_number = ?,
-            reviews_count = ?,
-            ratings = ?,
-            city = ?,
-            state = ?,
-            area = ?,
-            subcategory = ?
-        WHERE global_business_id = ?
+        SET website_url = %s,
+            phone_number = %s,
+            reviews_count = %s,
+            ratings = %s,
+            city = %s,
+            state = %s,
+            area = %s,
+            subcategory = %s
+        WHERE global_business_id = %s
         """,
         (
-            website,
+            website_url,
             phone_number,
             reviews_count,
-            reviews_average,
+            ratings,
             city,
             state,
             area,
@@ -185,32 +174,28 @@ def insert_new_business(cursor, record):
             area,
             created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
-            record.get("name", ""),
+            record.get("business_name", ""),
             record.get("address", ""),
-            record.get("website", ""),
+            record.get("website_url", ""),
             record.get("phone_number", ""),
             record.get("reviews_count", 0),
-            record.get("reviews_average", 0.0),
-            record.get("category", ""),
+            record.get("ratings", 0.0),
+            record.get("business_category", ""),
             record.get("subcategory", ""),
             record.get("city", ""),
             record.get("state", ""),
             record.get("area", ""),
-            datetime.now().isoformat()
+            datetime.now() 
         )
     )
 
-DB = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "g_map_master_table.db"
-)
 
-def save_results_to_sqlite(results):
-    conn = sqlite3.connect(DB)
-    cursor = conn.cursor()
+def save_results_to_mysql(results):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
 
     inserted = 0
     updated = 0
@@ -227,7 +212,7 @@ def save_results_to_sqlite(results):
             # Duplicate check
             business_id = find_existing_business(
                 cursor,
-                record.get("name", ""),
+                record.get("business_name", ""),
                 record.get("city", "")
             )
 
@@ -250,7 +235,7 @@ def save_results_to_sqlite(results):
         conn.commit()
 
         print(
-            f"SQLite Sync Complete | "
+            f"MySQL Sync Complete | "
             f"Inserted={inserted}, "
             f"Updated={updated}, "
             f"Skipped={skipped}"
@@ -258,10 +243,11 @@ def save_results_to_sqlite(results):
 
     except Exception as e:
         conn.rollback()
-        print(f"SQLite Sync Error: {e}")
+        print(f"MySQL Sync Error: {e}")
         raise
 
     finally:
+        cursor.close()
         conn.close()
 def scrape_ddg_results(query: str) -> List[Dict]:
     url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
@@ -332,6 +318,15 @@ def search_online_and_save(query: str) -> List[Dict]:
             )
         scraped_context = "\n".join(formatted_results)
 
+Each object must contain ONLY these fields:
+business_name, address, website_url, phone_number, reviews_count, ratings, business_category,subcategory, city, state, area
+
+Rules:
+-- Always provide a subcategory whenever possible.
+-- Example:
+-  - category = Restaurant
+-  - subcategory = South Indian
+- Be extremely concise.
     prompt = f"""
 You are an advanced data extraction and enrichment agent for local businesses.
 We searched the web for: "{query}"
@@ -393,7 +388,7 @@ Rules:
         return []
 
     results = _normalize_results(raw_results)
-    save_results_to_sqlite(results)
+    save_results_to_mysql(results)
 
     # ----- Save to Excel -----
     df = pd.DataFrame(results)
@@ -426,6 +421,6 @@ if __name__ == "__main__":
         print(f"✅ {len(results)} result(s):\n")
         for i, r in enumerate(results, 1):
             print(
-                f"{i}. {r['name']} | {r['category']} | "
+                f"{i}. {r['business_name']} | {r['business_category']} | "
                 f"{r['city']}, {r['state']}"
             )
