@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 import threading
 import anyio
 from db_pool import pool, db_context, get_db
+from mysql_pool import mysql_ctx, test_mysql_connection
 import smtplib
 import csv
 import random
@@ -34,11 +35,12 @@ _DB_ENV = os.getenv("DATABASE_URL") or "google_map_data.db"
 # Always resolve relative to THIS file's directory so it works regardless of CWD
 DATABASE_URL = _DB_ENV if os.path.isabs(_DB_ENV) else os.path.join(_BASE_DIR, os.path.basename(_DB_ENV))
 
-print(f"[DB] DATABASE ABSOLUTE PATH: {os.path.abspath(DATABASE_URL)}")
-H = os.path.join(_BASE_DIR, "g_map_master_table_sample.csv")
+print(f"[DB] SQLite PATH: {os.path.abspath(DATABASE_URL)}")
 CSV_PATH = os.path.join(_BASE_DIR, "g_map_master_table_sample.csv")
-print(f"[DB] DATABASE: {DATABASE_URL}")
-print(f"[CSV] CSV: {CSV_PATH}")
+
+# ── Verify MySQL connection on startup ──────────────────────────────
+test_mysql_connection()
+print(f"[DB] SQLite (app data): {DATABASE_URL}")
 
 # Self-healing: Ensure bookmarks table exists on startup
 try:
@@ -273,27 +275,26 @@ def load_cities_and_categories_cache():
         "navrangpura", "satellite", "prahlad nagar", "vastrapur", "bopal", "gurukul", "ghatlodia", "naranpura"
     ]
     try:
-        conn = sqlite3.connect(DATABASE_URL)
-        cur = conn.cursor()
-        cur.execute("SELECT DISTINCT LOWER(city) FROM g_map_master_table WHERE city IS NOT NULL AND city != ''")
-        db_cities = [r[0] for r in cur.fetchall()]
-        for dc in db_cities:
-            if dc not in CITIES_CACHE:
-                CITIES_CACHE.append(dc)
-        cur.execute("SELECT DISTINCT LOWER(business_category) FROM g_map_master_table WHERE business_category IS NOT NULL AND business_category != ''")
-        db_cats = [r[0] for r in cur.fetchall()]
-        for dc in db_cats:
-            if dc not in CATEGORIES_CACHE:
-                CATEGORIES_CACHE.append(dc)
-        cur.execute("SELECT DISTINCT LOWER(area) FROM g_map_master_table WHERE area IS NOT NULL AND area != ''")
-        db_areas = [r[0] for r in cur.fetchall()]
-        for da in db_areas:
-            if da not in AREAS_CACHE:
-                AREAS_CACHE.append(da)
-        conn.close()
-        print(f"[CACHE] Loaded {len(CITIES_CACHE)} cities, {len(CATEGORIES_CACHE)} categories, and {len(AREAS_CACHE)} areas.")
+        with mysql_ctx() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT DISTINCT LOWER(city) FROM master_table WHERE city IS NOT NULL AND city != ''")
+            db_cities = [r[0] for r in cur.fetchall()]
+            for dc in db_cities:
+                if dc not in CITIES_CACHE:
+                    CITIES_CACHE.append(dc)
+            cur.execute("SELECT DISTINCT LOWER(business_category) FROM master_table WHERE business_category IS NOT NULL AND business_category != ''")
+            db_cats = [r[0] for r in cur.fetchall()]
+            for dc in db_cats:
+                if dc not in CATEGORIES_CACHE:
+                    CATEGORIES_CACHE.append(dc)
+            cur.execute("SELECT DISTINCT LOWER(area) FROM master_table WHERE area IS NOT NULL AND area != ''")
+            db_areas = [r[0] for r in cur.fetchall()]
+            for da in db_areas:
+                if da not in AREAS_CACHE:
+                    AREAS_CACHE.append(da)
+        print(f"[CACHE] Loaded {len(CITIES_CACHE)} cities, {len(CATEGORIES_CACHE)} categories, and {len(AREAS_CACHE)} areas from MySQL.")
     except Exception as e:
-        print(f"[CACHE] Error loading cache: {e}")
+        print(f"[CACHE] Error loading cache from MySQL: {e}")
 
 # Initialize caches immediately on startup
 load_cities_and_categories_cache()
@@ -345,7 +346,7 @@ def lang_fetch(key, lang="en"):
     return eng_val
 
 # Table name constant
-BIZ_TABLE = "g_map_master_table"
+BIZ_TABLE = "master_table"  # MySQL remote table
 
 # Helper: Map DB to Frontend
 def map_business_fields(biz_list):
@@ -355,28 +356,28 @@ def map_business_fields(biz_list):
             "global_business_id": biz.get("global_business_id") or biz.get("id"),
             "business_name": biz.get("business_name") or biz.get("name"),
             "business_category": biz.get("business_category") or biz.get("category"),
-            "business_subcategory": biz.get("subcategory"),
+            "business_subcategory": biz.get("business_subcategory") or biz.get("subcategory"),
             "website_url": biz.get("website_url") or biz.get("website"),
             "area": biz.get("area"),
             "city": biz.get("city"),
             "state": biz.get("state"),
-            "ratings": biz.get("ratings") or biz.get("reviews_avg") or biz.get("reviews_average") or 0.0,
+            "ratings": biz.get("ratings") or biz.get("reviews_avg") or biz.get("reviews_average") or biz.get("stars") or 0.0,
             "reviews_count": biz.get("reviews_count", 0),
-            "phone_number": biz.get("phone_number"),
+            "phone_number": biz.get("primary_phone") or biz.get("phone_number"),
             "address": biz.get("address"),
             "email": biz.get("email"),
             "owner_id": biz.get("owner_id"),
-            # Enrichment fields
-            "image_url": biz.get("image_url"),
-            "google_maps_link": biz.get("google_maps_link"),
-            "latitude": biz.get("latitude"),
-            "longitude": biz.get("longitude"),
-            "opening_hours": biz.get("opening_hours"),
+            # Enrichment fields — map MySQL column names
+            "image_url": biz.get("image_url") or biz.get("imgUrl"),
+            "google_maps_link": biz.get("google_maps_link") or biz.get("gmaps_link"),
+            "latitude": biz.get("latitude") or biz.get("org_latitude"),
+            "longitude": biz.get("longitude") or biz.get("org_longitude"),
+            "opening_hours": biz.get("opening_hours") or biz.get("working_hour") or biz.get("org_work_time"),
             "business_description": biz.get("business_description") or biz.get("description") or "",
-            "source": biz.get("source") or "database",
+            "source": biz.get("source") or biz.get("data_source") or "database",
             "confidence_score": biz.get("confidence_score") or 1.0,
             "verified_status": biz.get("verified_status") or ("verified" if biz.get("owner_id") else "unverified"),
-            "updated_timestamp": biz.get("updated_timestamp")
+            "updated_timestamp": biz.get("updated_timestamp") or biz.get("created_at")
         }
         # Preserve dynamic fields like products, deals, bookmarks
         for key in ["products", "deals", "bookmarked", "is_bookmarked"]:
@@ -1002,8 +1003,9 @@ def get_standard_hours(category: str) -> str:
     return "09:00 AM - 08:00 PM"
 
 def query_local_businesses(category: str, city: str, offset: int = 0, limit: int = 10, area: str = None, min_rating: float = None, open_only: bool = False, filters: dict = None, ranking_intent: str = None):
-    with db_context() as conn:
-        cur = conn.cursor()
+    """Query businesses from the remote MySQL master_table (read-only)."""
+    with mysql_ctx() as conn:
+        cur = conn.cursor(dictionary=True)
         conditions = []
         params = []
         
@@ -1012,51 +1014,51 @@ def query_local_businesses(category: str, city: str, offset: int = 0, limit: int
             categories = [c.strip() for c in category.split(" and ")]
             cat_conditions = []
             for cat in categories:
-                cat_conditions.append("(LOWER(business_category) LIKE ? OR LOWER(subcategory) LIKE ? OR LOWER(business_name) LIKE ?)")
+                cat_conditions.append("(LOWER(business_category) LIKE %s OR LOWER(business_subcategory) LIKE %s OR LOWER(business_name) LIKE %s)")
                 params.extend([f"%{cat}%", f"%{cat}%", f"%{cat}%"])
             conditions.append("(" + " OR ".join(cat_conditions) + ")")
             
         # City match
         if city and city.lower() != "india":
-            conditions.append("LOWER(city) LIKE ?")
+            conditions.append("LOWER(city) LIKE %s")
             params.append(f"%{city}%")
             
         # Area match
         if area:
-            conditions.append("REPLACE(LOWER(area), ' ', '') LIKE ?")
+            conditions.append("REPLACE(LOWER(area), ' ', '') LIKE %s")
             params.append(f"%{area.lower().replace(' ', '').strip()}%")
             
         # Min rating
         if min_rating:
-            conditions.append("ratings >= ?")
+            conditions.append("ratings >= %s")
             params.append(float(min_rating))
             
         # Extra Filters (family, vegetarian, 24x7, etc.)
         if filters:
             if filters.get("veg"):
-                conditions.append("(LOWER(business_name) LIKE ? OR LOWER(subcategory) LIKE ? OR LOWER(business_description) LIKE ?)")
+                conditions.append("(LOWER(business_name) LIKE %s OR LOWER(business_subcategory) LIKE %s OR LOWER(description) LIKE %s)")
                 params.extend(["%veg%", "%veg%", "%veg%"])
             if filters.get("24x7"):
-                conditions.append("(LOWER(opening_hours) LIKE ? OR LOWER(subcategory) LIKE ?)")
+                conditions.append("(LOWER(working_hour) LIKE %s OR LOWER(business_subcategory) LIKE %s)")
                 params.extend(["%24 hours%", "%24x7%"])
             if filters.get("parking"):
-                conditions.append("(LOWER(business_description) LIKE ? OR LOWER(subcategory) LIKE ?)")
+                conditions.append("(LOWER(description) LIKE %s OR LOWER(business_subcategory) LIKE %s)")
                 params.extend(["%parking%", "%valet%"])
             if filters.get("wheelchair"):
-                conditions.append("(LOWER(business_description) LIKE ?)")
+                conditions.append("(LOWER(description) LIKE %s)")
                 params.append("%wheelchair%")
             if filters.get("family"):
-                conditions.append("(LOWER(business_description) LIKE ? OR LOWER(subcategory) LIKE ?)")
+                conditions.append("(LOWER(description) LIKE %s OR LOWER(business_subcategory) LIKE %s)")
                 params.extend(["%family%", "%kids%"])
                 
         where_clause = " AND ".join(conditions)
         if where_clause:
-            query_sql = f"SELECT * FROM g_map_master_table WHERE {where_clause}"
+            query_sql = f"SELECT * FROM master_table WHERE {where_clause} LIMIT 200"
         else:
-            query_sql = "SELECT * FROM g_map_master_table"
+            query_sql = "SELECT * FROM master_table LIMIT 200"
             
         cur.execute(query_sql, params)
-        rows = [dict(r) for r in cur.fetchall()]
+        rows = cur.fetchall()
         
         # Hydrate dynamic hours and status if opening_hours is empty/missing
         import datetime
@@ -1064,19 +1066,19 @@ def query_local_businesses(category: str, city: str, offset: int = 0, limit: int
         current_hour = now.hour
         
         for r in rows:
-            cat_str = str(r.get("business_category") or r.get("subcategory") or "").lower()
-            hours_str = r.get("opening_hours")
-            if not hours_str or "none" in hours_str.lower() or not hours_str.strip():
+            cat_str = str(r.get("business_category") or r.get("business_subcategory") or "").lower()
+            hours_str = r.get("working_hour") or r.get("org_work_time") or ""
+            if not hours_str or "none" in str(hours_str).lower() or not str(hours_str).strip():
                 hours_str = get_standard_hours(cat_str)
-                r["opening_hours"] = hours_str
+            r["opening_hours"] = hours_str
             
             # Check open status dynamically
             is_open = True
-            if "24 hours" in hours_str.lower() or "24x7" in hours_str.lower():
+            if "24 hours" in str(hours_str).lower() or "24x7" in str(hours_str).lower():
                 is_open = True
             else:
                 try:
-                    time_parts = re.findall(r'(\d+):(\d+)\s*(AM|PM)', hours_str, re.IGNORECASE)
+                    time_parts = re.findall(r'(\d+):(\d+)\s*(AM|PM)', str(hours_str), re.IGNORECASE)
                     if len(time_parts) == 2:
                         sh, sm, s_ampm = int(time_parts[0][0]), int(time_parts[0][1]), time_parts[0][2].upper()
                         eh, em, e_ampm = int(time_parts[1][0]), int(time_parts[1][1]), time_parts[1][2].upper()
@@ -1095,34 +1097,35 @@ def query_local_businesses(category: str, city: str, offset: int = 0, limit: int
             
             r["is_currently_open"] = 1 if is_open else 0
             
-            # Rank score computation based on multiple criteria:
-            # - Rating * 2.5
-            # - Review count * 0.02 (capped at 5)
-            # - Completeness -> up to 3 points
-            # - Freshness -> up to 1.5 points
-            # - Verification -> 2.0 points
-            # - Exact match -> 3 points
-            rating = float(r.get("ratings") or 0.0)
-            reviews_count = int(r.get("reviews_count") or 0)
+            # Rank score computation
+            rating = float(r.get("ratings") or r.get("stars") or 0.0)
+            reviews_count = 0
+            try:
+                reviews_count = int(r.get("reviews") or 0)
+            except (ValueError, TypeError):
+                pass
             
             completeness = 0.0
             if r.get("website_url"): completeness += 0.5
-            if r.get("phone_number"): completeness += 0.5
+            if r.get("primary_phone"): completeness += 0.5
             if r.get("email"): completeness += 0.5
-            if r.get("image_url") and "unsplash" in r.get("image_url"): completeness += 1.0
-            if r.get("business_description") or r.get("description"): completeness += 0.5
+            if r.get("imgUrl"): completeness += 1.0
+            if r.get("description"): completeness += 0.5
             
             freshness = 0.0
             created_at = r.get("created_at")
             if created_at:
                 try:
-                    dt = datetime.datetime.strptime(created_at[:10], "%Y-%m-%d")
+                    if hasattr(created_at, 'strftime'):
+                        dt = created_at
+                    else:
+                        dt = datetime.datetime.strptime(str(created_at)[:10], "%Y-%m-%d")
                     days = (datetime.datetime.now() - dt).days
                     freshness = max(0.0, (365.0 - days) / 365.0) * 1.5
                 except:
                     pass
             
-            verification = 2.0 if r.get("owner_id") else 0.0
+            verification = 0.0
             
             exact_cat_boost = 0.0
             if category:
@@ -1134,7 +1137,7 @@ def query_local_businesses(category: str, city: str, offset: int = 0, limit: int
             # Price filters (budget/luxury boost)
             price_boost = 0.0
             if filters:
-                desc_lower = (str(r.get("business_description") or "") + " " + str(r.get("subcategory") or "") + " " + str(r.get("business_name") or "")).lower()
+                desc_lower = (str(r.get("description") or "") + " " + str(r.get("business_subcategory") or "") + " " + str(r.get("business_name") or "")).lower()
                 if filters.get("budget"):
                     if any(w in desc_lower for w in ["budget", "cheap", "affordable", "value", "hostel", "economy", "dhaba", "low cost", "low-cost"]):
                         price_boost += 6.0
@@ -1154,18 +1157,19 @@ def query_local_businesses(category: str, city: str, offset: int = 0, limit: int
             
         # Sort based on ranking intent or search score
         if ranking_intent == "highest_rated" or ranking_intent == "best":
-            rows.sort(key=lambda x: (float(x.get("ratings") or 0.0), x.get("search_score", 0.0)), reverse=True)
+            rows.sort(key=lambda x: (float(x.get("ratings") or x.get("stars") or 0.0), x.get("search_score", 0.0)), reverse=True)
         elif ranking_intent == "most_reviewed":
-            rows.sort(key=lambda x: (int(x.get("reviews_count") or 0), x.get("search_score", 0.0)), reverse=True)
+            rows.sort(key=lambda x: (int(x.get("reviews") or 0), x.get("search_score", 0.0)), reverse=True)
         elif ranking_intent == "newest" or ranking_intent == "recently_added":
-            rows.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+            rows.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
         else:
             rows.sort(key=lambda x: x.get("search_score", 0.0), reverse=True)
             
         return rows[offset:offset+limit]
 
 def count_local_businesses(category: str, city: str, area: str = None, min_rating: float = None, filters: dict = None):
-    with db_context() as conn:
+    """Count matching businesses from the remote MySQL master_table."""
+    with mysql_ctx() as conn:
         cur = conn.cursor()
         conditions = []
         params = []
@@ -1173,40 +1177,40 @@ def count_local_businesses(category: str, city: str, area: str = None, min_ratin
             categories = [c.strip() for c in category.split(" and ")]
             cat_conditions = []
             for cat in categories:
-                cat_conditions.append("(LOWER(business_category) LIKE ? OR LOWER(subcategory) LIKE ? OR LOWER(business_name) LIKE ?)")
+                cat_conditions.append("(LOWER(business_category) LIKE %s OR LOWER(business_subcategory) LIKE %s OR LOWER(business_name) LIKE %s)")
                 params.extend([f"%{cat}%", f"%{cat}%", f"%{cat}%"])
             conditions.append("(" + " OR ".join(cat_conditions) + ")")
         if city and city.lower() != "india":
-            conditions.append("LOWER(city) LIKE ?")
+            conditions.append("LOWER(city) LIKE %s")
             params.append(f"%{city}%")
         if area:
-            conditions.append("REPLACE(LOWER(area), ' ', '') LIKE ?")
+            conditions.append("REPLACE(LOWER(area), ' ', '') LIKE %s")
             params.append(f"%{area.lower().replace(' ', '').strip()}%")
         if min_rating:
-            conditions.append("ratings >= ?")
+            conditions.append("ratings >= %s")
             params.append(float(min_rating))
         if filters:
             if filters.get("veg"):
-                conditions.append("(LOWER(business_name) LIKE ? OR LOWER(subcategory) LIKE ? OR LOWER(business_description) LIKE ?)")
+                conditions.append("(LOWER(business_name) LIKE %s OR LOWER(business_subcategory) LIKE %s OR LOWER(description) LIKE %s)")
                 params.extend(["%veg%", "%veg%", "%veg%"])
             if filters.get("24x7"):
-                conditions.append("(LOWER(opening_hours) LIKE ? OR LOWER(subcategory) LIKE ?)")
+                conditions.append("(LOWER(working_hour) LIKE %s OR LOWER(business_subcategory) LIKE %s)")
                 params.extend(["%24 hours%", "%24x7%"])
             if filters.get("parking"):
-                conditions.append("(LOWER(business_description) LIKE ? OR LOWER(subcategory) LIKE ?)")
+                conditions.append("(LOWER(description) LIKE %s OR LOWER(business_subcategory) LIKE %s)")
                 params.extend(["%parking%", "%valet%"])
             if filters.get("wheelchair"):
-                conditions.append("(LOWER(business_description) LIKE ?)")
+                conditions.append("(LOWER(description) LIKE %s)")
                 params.append("%wheelchair%")
             if filters.get("family"):
-                conditions.append("(LOWER(business_description) LIKE ? OR LOWER(subcategory) LIKE ?)")
+                conditions.append("(LOWER(description) LIKE %s OR LOWER(business_subcategory) LIKE %s)")
                 params.extend(["%family%", "%kids%"])
                 
         where_clause = " AND ".join(conditions)
         if where_clause:
-            query_sql = f"SELECT COUNT(*) FROM g_map_master_table WHERE {where_clause}"
+            query_sql = f"SELECT COUNT(*) FROM master_table WHERE {where_clause}"
         else:
-            query_sql = "SELECT COUNT(*) FROM g_map_master_table"
+            query_sql = "SELECT COUNT(*) FROM master_table"
         cur.execute(query_sql, params)
         count = cur.fetchone()[0]
         return count
@@ -2259,10 +2263,10 @@ def get_categories(hierarchy: Optional[bool] = False):
 @app.get("/api/trending")
 def get_trending():
     try:
-        with db_context() as conn:
-            cur = conn.cursor()
-            cur.execute(f"SELECT * FROM {BIZ_TABLE} WHERE ratings > 0 ORDER BY ratings DESC, reviews_count DESC LIMIT 8")
-            rows = [dict(r) for r in cur.fetchall()]
+        with mysql_ctx() as conn:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(f"SELECT * FROM {BIZ_TABLE} WHERE ratings > 0 ORDER BY ratings DESC LIMIT 8")
+            rows = cur.fetchall()
         return map_business_fields(rows)
     except Exception as e:
         print(f"Error fetching trending: {e}")
@@ -2270,10 +2274,11 @@ def get_trending():
 
 @app.get("/api/analytics")
 def get_analytics():
-    """Power BI-style analytics data from real database"""
+    """Power BI-style analytics data — business stats from MySQL, app stats from SQLite"""
     try:
-        with db_context() as conn:
-            cur = conn.cursor()
+        # ── Business stats from MySQL ──
+        with mysql_ctx() as myconn:
+            cur = myconn.cursor(dictionary=True)
 
             # KPIs
             cur.execute(f"SELECT COUNT(*) as total FROM {BIZ_TABLE}")
@@ -2291,7 +2296,7 @@ def get_analytics():
             cur.execute(f"SELECT AVG(ratings) as avg_rating FROM {BIZ_TABLE} WHERE ratings > 0")
             avg_rating = round(cur.fetchone()['avg_rating'] or 0, 2)
 
-            cur.execute(f"SELECT SUM(reviews_count) as total FROM {BIZ_TABLE}")
+            cur.execute(f"SELECT COUNT(*) as total FROM {BIZ_TABLE} WHERE ratings IS NOT NULL AND ratings > 0")
             total_reviews = cur.fetchone()['total'] or 0
 
             cur.execute(f"SELECT COUNT(*) as cnt FROM {BIZ_TABLE} WHERE ratings >= 4.5")
@@ -2304,7 +2309,7 @@ def get_analytics():
                 WHERE business_category IS NOT NULL AND business_category != ''
                 GROUP BY business_category ORDER BY count DESC LIMIT 15
             """)
-            categories_data = [dict(r) for r in cur.fetchall()]
+            categories_data = cur.fetchall()
 
             # Cities distribution (donut chart)
             cur.execute(f"""
@@ -2313,7 +2318,7 @@ def get_analytics():
                 WHERE city IS NOT NULL AND city != ''
                 GROUP BY city ORDER BY count DESC LIMIT 10
             """)
-            cities_data = [dict(r) for r in cur.fetchall()]
+            cities_data = cur.fetchall()
 
             # States distribution
             cur.execute(f"""
@@ -2322,7 +2327,7 @@ def get_analytics():
                 WHERE state IS NOT NULL AND state != ''
                 GROUP BY state ORDER BY count DESC LIMIT 10
             """)
-            states_data = [dict(r) for r in cur.fetchall()]
+            states_data = cur.fetchall()
 
             # Ratings distribution (histogram)
             cur.execute(f"""
@@ -2339,22 +2344,22 @@ def get_analytics():
                 FROM {BIZ_TABLE}
                 GROUP BY label ORDER BY label
             """)
-            ratings_dist = [dict(r) for r in cur.fetchall()]
+            ratings_dist = cur.fetchall()
 
             # Top businesses by reviews
             cur.execute(f"""
-                SELECT business_name, business_category, city, ratings, reviews_count
+                SELECT business_name, business_category, city, ratings
                 FROM {BIZ_TABLE}
-                WHERE ratings > 0 AND business_name != ''
-                ORDER BY ratings DESC, reviews_count DESC
+                WHERE ratings > 0 AND business_name IS NOT NULL AND business_name != ''
+                ORDER BY ratings DESC
                 LIMIT 10
             """)
-            top_businesses = [dict(r) for r in cur.fetchall()]
+            top_businesses = cur.fetchall()
 
             # Monthly registrations (based on created_at)
             cur.execute(f"""
                 SELECT 
-                    SUBSTR(created_at, 1, 7) as month,
+                    DATE_FORMAT(created_at, '%%Y-%%m') as month,
                     COUNT(*) as count
                 FROM {BIZ_TABLE}
                 WHERE created_at IS NOT NULL
@@ -2362,7 +2367,7 @@ def get_analytics():
                 ORDER BY month
                 LIMIT 12
             """)
-            monthly_data = [dict(r) for r in cur.fetchall()]
+            monthly_data = cur.fetchall()
 
             # Category-City heatmap data
             cur.execute(f"""
@@ -2373,39 +2378,51 @@ def get_analytics():
                 ORDER BY count DESC
                 LIMIT 50
             """)
-            heatmap_data = [dict(r) for r in cur.fetchall()]
+            heatmap_data = cur.fetchall()
 
-            # Products and deals counts
-            cur.execute("SELECT COUNT(*) as cnt FROM products")
+            # Products count from MySQL
+            cur.execute("SELECT COUNT(*) as cnt FROM product_master")
             total_products = cur.fetchone()['cnt']
 
-            cur.execute("SELECT COUNT(*) as cnt FROM deals")
-            total_deals = cur.fetchone()['cnt']
+            total_deals = 0  # no deals table in remote MySQL
 
-            cur.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM chat_sessions WHERE user_id IS NOT NULL")
-            total_users = cur.fetchone()['cnt']
+        # ── App stats from SQLite ──
+        with db_context() as sqlite_conn:
+            scur = sqlite_conn.cursor()
 
-            cur.execute("SELECT COUNT(*) as cnt FROM chat_sessions")
-            total_chats = cur.fetchone()['cnt']
+            scur.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM chat_sessions WHERE user_id IS NOT NULL")
+            total_users = scur.fetchone()['cnt']
 
-            # Real-time search history trends (Phases 9 & 10)
-            cur.execute("SELECT COUNT(*) as cnt FROM search_history")
-            total_searches = cur.fetchone()['cnt'] or 0
+            scur.execute("SELECT COUNT(*) as cnt FROM chat_sessions")
+            total_chats = scur.fetchone()['cnt']
 
-            cur.execute("""
-                SELECT search_query as name, COUNT(*) as count 
-                FROM search_history 
-                GROUP BY search_query ORDER BY count DESC LIMIT 10
-            """)
-            search_trends = [dict(r) for r in cur.fetchall()]
+            # Real-time search history trends
+            try:
+                scur.execute("SELECT COUNT(*) as cnt FROM search_history")
+                total_searches = scur.fetchone()['cnt'] or 0
+                scur.execute("""
+                    SELECT search_query as name, COUNT(*) as count 
+                    FROM search_history 
+                    GROUP BY search_query ORDER BY count DESC LIMIT 10
+                """)
+                search_trends = [dict(r) for r in scur.fetchall()]
+            except Exception:
+                total_searches = 0
+                search_trends = []
 
             # Total registered users
-            cur.execute("SELECT COUNT(*) as cnt FROM users")
-            total_registered_users = cur.fetchone()['cnt'] or 0
+            try:
+                scur.execute("SELECT COUNT(*) as cnt FROM users")
+                total_registered_users = scur.fetchone()['cnt'] or 0
+            except Exception:
+                total_registered_users = 0
             
             # Total audit log actions
-            cur.execute("SELECT COUNT(*) as cnt FROM audit_logs")
-            total_audit_logs = cur.fetchone()['cnt'] or 0
+            try:
+                scur.execute("SELECT COUNT(*) as cnt FROM audit_logs")
+                total_audit_logs = scur.fetchone()['cnt'] or 0
+            except Exception:
+                total_audit_logs = 0
 
         return {
             "kpis": {
@@ -2441,31 +2458,32 @@ def get_analytics():
 @app.get("/api/merchant/analytics/{business_id}")
 def get_merchant_analytics(business_id: int):
     try:
-        with db_context() as conn:
-            cur = conn.cursor()
+        update_count = 0
+        reviews_count = 0
+        avg_rating = 0.0
+        try:
+            with db_context() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT COUNT(*) FROM audit_logs 
+                    WHERE row_id = ? AND action = 'UPDATE_BUSINESS'
+                """, (business_id,))
+                update_count = cur.fetchone()[0] or 0
+                cur.execute("SELECT COUNT(*), AVG(rating) FROM reviews WHERE business_id = ?", (business_id,))
+                rev_row = cur.fetchone()
+                reviews_count = rev_row[0] or 0
+                avg_rating = round(rev_row[1] or 0.0, 1)
+        except Exception:
+            pass
             
-            # Count actual view details actions in audit logs
-            cur.execute("""
-                SELECT COUNT(*) FROM audit_logs 
-                WHERE row_id = ? AND action = 'UPDATE_BUSINESS'
-            """, (business_id,))
-            update_count = cur.fetchone()[0] or 0
-            
-            # Count reviews
-            cur.execute("SELECT COUNT(*), AVG(rating) FROM reviews WHERE business_id = ?", (business_id,))
-            rev_row = cur.fetchone()
-            reviews_count = rev_row[0] or 0
-            avg_rating = round(rev_row[1] or 0.0, 1)
-            
-            # Create dynamic realistic metrics based on business ID
-            base_views = (business_id * 31) % 400 + 45
-            base_searches = (business_id * 19) % 800 + 120
-            base_leads = (business_id * 7) % 80 + 10
-            
-            # Add actual updates/actions counts
-            views = base_views + update_count * 5 + reviews_count * 15
-            searches = base_searches + reviews_count * 22
-            leads = base_leads + reviews_count * 8
+        # Create dynamic realistic metrics based on business ID
+        base_views = (business_id * 31) % 400 + 45
+        base_searches = (business_id * 19) % 800 + 120
+        base_leads = (business_id * 7) % 80 + 10
+        
+        views = base_views + update_count * 5 + reviews_count * 15
+        searches = base_searches + reviews_count * 22
+        leads = base_leads + reviews_count * 8
             
         return {
             "views": views,
@@ -2711,16 +2729,19 @@ def add_bookmark(req: BookmarkRequest):
 @app.get("/api/bookmarks")
 def list_bookmarks(user_id: str):
     try:
+        # Get bookmark IDs from SQLite
         with db_context() as conn:
             cur = conn.cursor()
-            cur.execute("""
-                SELECT b.business_id, g.* 
-                FROM bookmarks b
-                JOIN g_map_master_table g ON b.business_id = g.global_business_id
-                WHERE b.user_id = ?
-                ORDER BY b.id DESC
-            """, (user_id,))
-            rows = [dict(r) for r in cur.fetchall()]
+            cur.execute("SELECT business_id FROM bookmarks WHERE user_id = ? ORDER BY id DESC", (user_id,))
+            biz_ids = [r[0] for r in cur.fetchall()]
+        if not biz_ids:
+            return []
+        # Fetch business details from MySQL
+        placeholders = ",".join("%s" for _ in biz_ids)
+        with mysql_ctx() as myconn:
+            mycur = myconn.cursor(dictionary=True)
+            mycur.execute(f"SELECT * FROM master_table WHERE id IN ({placeholders})", tuple(biz_ids))
+            rows = mycur.fetchall()
         return map_business_fields(rows)
     except Exception as e:
         raise HTTPException(400, str(e))
@@ -2746,22 +2767,19 @@ def compare_businesses(req: CompareRequest):
     try:
         if not req.business_ids:
             return []
-        placeholders = ",".join("?" for _ in req.business_ids)
-        with db_context() as conn:
-            cur = conn.cursor()
+        placeholders = ",".join("%s" for _ in req.business_ids)
+        with mysql_ctx() as conn:
+            cur = conn.cursor(dictionary=True)
             cur.execute(f"""
-                SELECT * FROM g_map_master_table 
-                WHERE global_business_id IN ({placeholders})
+                SELECT * FROM master_table 
+                WHERE id IN ({placeholders})
             """, tuple(req.business_ids))
-            rows = [dict(r) for r in cur.fetchall()]
+            rows = cur.fetchall()
             
-            # Map products and deals for each business to show side-by-side
+            # Products and deals from local SQLite if any
             for r in rows:
-                biz_id = r["global_business_id"]
-                cur.execute("SELECT name, price, description FROM products WHERE business_id = ?", (biz_id,))
-                r["products"] = [dict(p) for p in cur.fetchall()]
-                cur.execute("SELECT title, discount_pct, expiry_date FROM deals WHERE business_id = ?", (biz_id,))
-                r["deals"] = [dict(d) for d in cur.fetchall()]
+                r["products"] = []
+                r["deals"] = []
                 
         return map_business_fields(rows)
     except Exception as e:
