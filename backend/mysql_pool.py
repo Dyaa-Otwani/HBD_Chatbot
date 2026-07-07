@@ -115,18 +115,17 @@ def test_mysql_connection():
         print("=" * 50)
         print("HoneyBee Digital Backend Started")
         if db_name:
-            print(f"✅ Successfully connected to MySQL database: {db_name}")
+            print(f"Successfully connected to MySQL database: {db_name}")
         else:
             # Fallback to required example DB name when env is missing.
-            print("✅ Successfully connected to MySQL database: genuineh")
+            print("Successfully connected to MySQL database: genuineh")
         print(f"Host: {MYSQL_HOST}:{MYSQL_PORT}")
         print("=" * 50)
         return True
     except Exception as e:
         print("=" * 50)
         print("HoneyBee Digital Backend Started")
-        print("❌ Failed to connect to MySQL database")
+        print("Failed to connect to MySQL database")
         print(f"Reason: {e}")
         print("=" * 50)
         return False
-

@@ -377,7 +377,7 @@ def map_business_fields(biz_list):
             "source": biz.get("source") or biz.get("data_source") or "database",
             "confidence_score": biz.get("confidence_score") or 1.0,
             "verified_status": biz.get("verified_status") or ("verified" if biz.get("owner_id") else "unverified"),
-            "updated_timestamp": biz.get("updated_timestamp") or biz.get("created_at")
+            "updated_timestamp": str(biz.get("updated_timestamp") or biz.get("created_at") or "")
         }
         # Preserve dynamic fields like products, deals, bookmarks
         for key in ["products", "deals", "bookmarked", "is_bookmarked"]:
@@ -385,6 +385,26 @@ def map_business_fields(biz_list):
                 mapped[key] = biz[key]
         mapped_list.append(mapped)
     return mapped_list
+
+def map_product_fields(prod_list):
+    mapped_list = []
+    for prod in prod_list:
+        mapped = {
+            "id": prod.get("id"),
+            "product_name": prod.get("product_name"),
+            "brand": prod.get("brand"),
+            "price": prod.get("price"),
+            "list_price": prod.get("list_price"),
+            "stars": prod.get("stars"),
+            "reviews": prod.get("reviews"),
+            "image_url": prod.get("img_url"),
+            "category_name": prod.get("category_name"),
+            "product_url": prod.get("product_url"),
+            "description": prod.get("description")
+        }
+        mapped_list.append(mapped)
+    return mapped_list
+
 
 # Rate Limiting & Prompt Injection Guards
 import time
@@ -1460,6 +1480,79 @@ async def search(req: SearchRequest):
         else:
             chat_history = []
 
+        # --- RIGID CHATBOT FLOW INTERCEPTS (Direct MySQL Queries) ---
+        if q_lower in ["explore listings", "top rated businesses"]:
+            from mysql_pool import mysql_ctx
+            with mysql_ctx() as conn:
+                cur = conn.cursor(dictionary=True)
+                # Fetch Top Rated Businesses from master_table
+                cur.execute("SELECT * FROM master_table ORDER BY reviews_avg DESC LIMIT 5")
+                biz_results = cur.fetchall()
+                # Fetch categories for chips
+                cur.execute("SELECT category_name FROM Top_categories_rank ORDER BY category_rank ASC LIMIT 10")
+                cats = [row["category_name"] for row in cur.fetchall()]
+            
+            resp = {
+                "type": "database",
+                "data": map_business_fields(biz_results),
+                "intro": "Here are some of our top rated businesses:",
+                "suggestions": [{"title": c, "action": "query_rewrite", "query": c} for c in cats] + [{"title": "📍 Browse Locations", "action": "query_rewrite", "query": "Browse Locations"}]
+            }
+            if chat_session_id:
+                _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
+            return resp
+
+        if q_lower in ["browse products", "trending products"]:
+            from mysql_pool import mysql_ctx
+            with mysql_ctx() as conn:
+                cur = conn.cursor(dictionary=True)
+                cur.execute("SELECT * FROM product_master WHERE stars IS NOT NULL ORDER BY stars DESC LIMIT 5")
+                prod_results = cur.fetchall()
+                cur.execute("SELECT DISTINCT category_name FROM product_master WHERE category_name IS NOT NULL LIMIT 8")
+                cats = [row["category_name"] for row in cur.fetchall()]
+            
+            resp = {
+                "type": "database_products",
+                "data": map_product_fields(prod_results),
+                "intro": "Here are some trending products available right now:",
+                "suggestions": [{"title": c, "action": "query_rewrite", "query": c} for c in cats]
+            }
+            if chat_session_id:
+                _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
+            return resp
+
+        if q_lower == "browse categories":
+            from mysql_pool import mysql_ctx
+            with mysql_ctx() as conn:
+                cur = conn.cursor(dictionary=True)
+                cur.execute("SELECT category_name FROM Top_categories_rank ORDER BY category_rank ASC LIMIT 15")
+                cats = [row["category_name"] for row in cur.fetchall()]
+            
+            resp = {
+                "type": "faq",
+                "data": "We have businesses across many categories! Here are some of the most popular ones:",
+                "suggestions": [{"title": c, "action": "query_rewrite", "query": c} for c in cats]
+            }
+            if chat_session_id:
+                _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
+            return resp
+
+        if q_lower in ["browse locations", "top cities", "top cities 📍"]:
+            from mysql_pool import mysql_ctx
+            with mysql_ctx() as conn:
+                cur = conn.cursor(dictionary=True)
+                cur.execute("SELECT city_name FROM Top_cities_rank ORDER BY city_rank ASC LIMIT 15")
+                cities = [row["city_name"] for row in cur.fetchall()]
+            
+            resp = {
+                "type": "faq",
+                "data": "We have listings across all major cities! Select a city below to explore:",
+                "suggestions": [{"title": c, "action": "query_rewrite", "query": c} for c in cities]
+            }
+            if chat_session_id:
+                _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
+            return resp
+
         # --- NLU Classification & Multi-turn Resolution ---
         nlu = await anyio.to_thread.run_sync(parse_query_nlu, req.query, lang, chat_history)
         intents = nlu.get("intents", ["Unknown"])
@@ -1503,38 +1596,14 @@ async def search(req: SearchRequest):
 
         # --- Intent: Business Addition Save Confirmation ---
         if primary_intent == "Business Addition" or q_lower in ["save this business", "yes save it", "yes, save it! 📥"]:
-            # Retrieve pending business from last message's search metadata
-            metadata = None
+            resp = {
+                "type": "faq",
+                "data": "I am a strictly Read-Only AI Business Assistant and cannot add or modify businesses in the database.",
+                "suggestions": [{"title": "Search Restaurants 🍕", "action": "query_rewrite", "query": "Restaurants"}]
+            }
             if chat_session_id:
-                metadata = _get_last_search_metadata(chat_session_id)
-            
-            pending = metadata.get("pending_save_business") if metadata else None
-            if pending:
-                # Insert the pending business
-                with db_context() as conn:
-                    cur = conn.cursor()
-                    insert_new_business(cur, pending)
-                    conn.commit()
-                resp = {
-                    "type": "faq",
-                    "data": f"✅ Successfully saved **{pending.get('business_name')}** to our directory! It is now fully enriched and available for future searches.",
-                    "suggestions": [
-                        {"title": "Search again 🔍", "action": "query_rewrite", "query": "Find businesses"},
-                        {"title": f"Show details of {pending.get('business_name')} 🏢", "action": "query_rewrite", "query": f"details of {pending.get('business_name')}"}
-                    ]
-                }
-                if chat_session_id:
-                    _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
-                return resp
-            else:
-                resp = {
-                    "type": "faq",
-                    "data": "I couldn't find a pending business to add. What category or location would you like to search for?",
-                    "suggestions": [{"title": "Search Restaurants 🍕", "action": "query_rewrite", "query": "Restaurants"}]
-                }
-                if chat_session_id:
-                    _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
-                return resp
+                _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
+            return resp
 
         # --- Mandatory Auth Check for MY BUSINESS actions ---
         is_my_biz_query = any(x in q_lower for x in [
@@ -1660,13 +1729,14 @@ async def search(req: SearchRequest):
             biz_names = [n.strip() for n in biz_names if n.strip()]
             
             matched_listings = []
-            with db_context() as conn:
-                cur = conn.cursor()
+            from mysql_pool import mysql_ctx
+            with mysql_ctx() as conn:
+                cur = conn.cursor(dictionary=True)
                 for name in biz_names[:3]: # Compare up to 3
-                    cur.execute("SELECT * FROM g_map_master_table WHERE LOWER(business_name) LIKE ? LIMIT 1", (f"%{name}%",))
+                    cur.execute("SELECT * FROM master_table WHERE LOWER(business_name) LIKE %s LIMIT 1", (f"%{name}%",))
                     row = cur.fetchone()
                     if row:
-                        matched_listings.append(dict(row))
+                        matched_listings.append(row)
                         
             if len(matched_listings) >= 2:
                 mapped = map_business_fields(matched_listings)
@@ -1700,13 +1770,14 @@ async def search(req: SearchRequest):
             # Clean up
             biz_name_candidate = re.sub(r'\b(what is the|show the|find the)\b', '', biz_name_candidate).strip()
             
-            with db_context() as conn:
-                cur = conn.cursor()
-                cur.execute("SELECT * FROM g_map_master_table WHERE LOWER(business_name) LIKE ? LIMIT 1", (f"%{biz_name_candidate}%",))
+            from mysql_pool import mysql_ctx
+            with mysql_ctx() as conn:
+                cur = conn.cursor(dictionary=True)
+                cur.execute("SELECT * FROM master_table WHERE LOWER(business_name) LIKE %s LIMIT 1", (f"%{biz_name_candidate}%",))
                 row = cur.fetchone()
                 
             if row:
-                mapped = map_business_fields([dict(row)])[0]
+                mapped = map_business_fields([row])[0]
                 val_detail = ""
                 if primary_intent == "Business Website":
                     val_detail = f"The official website for **{mapped['business_name']}** is: {mapped['website_url'] or 'Not Available'}"
@@ -1725,6 +1796,83 @@ async def search(req: SearchRequest):
                         {"title": f"Compare with others ⚖️", "action": "query_rewrite", "query": f"Compare {mapped['business_name']} and Anytime Fitness"}
                     ]
                 }
+                if chat_session_id:
+                    _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
+                return resp
+
+        # --- Intent: Product Search ---
+        if primary_intent == "Product Search" or q_lower in ["products", "show products", "trending products", "recently added products"]:
+            product_category = entities.get("category")
+            product_name = entities.get("product")
+            if not product_name and not product_category:
+                product_name = q_lower.replace("products", "").replace("show", "").replace("trending", "").replace("recently added", "").strip() or None
+                
+            p_limit = entities.get("limit") or 10
+            p_offset = 0
+            try:
+                from mysql_pool import mysql_ctx
+                with mysql_ctx() as (conn, cur):
+                    query_str = "SELECT * FROM product_master WHERE 1=1"
+                    params = []
+                    if product_category:
+                        query_str += " AND (LOWER(category_name) LIKE %s OR LOWER(sub_category_name) LIKE %s)"
+                        params.extend([f"%{product_category.lower()}%", f"%{product_category.lower()}%"])
+                    if product_name:
+                        query_str += " AND (LOWER(product_name) LIKE %s OR LOWER(brand) LIKE %s)"
+                        params.extend([f"%{product_name.lower()}%", f"%{product_name.lower()}%"])
+                        
+                    ranking_map_prod = {"Budget Search": "budget", "Highest Rated": "highest_rated"}
+                    resolved_ranking = entities.get("ranking") or ranking_map_prod.get(primary_intent)
+                    if resolved_ranking == "highest_rated":
+                        query_str += " ORDER BY stars DESC"
+                    elif resolved_ranking == "budget":
+                        query_str += " ORDER BY price ASC"
+                    else:
+                        query_str += " ORDER BY stars DESC"
+                        
+                    query_str += f" LIMIT {p_limit} OFFSET {p_offset}"
+                    
+                    cur.execute(query_str, tuple(params))
+                    columns = [col[0] for col in cur.description]
+                    prod_results = [dict(zip(columns, row)) for row in cur.fetchall()]
+                    
+                formatted_products = []
+                for p in prod_results:
+                    formatted_products.append({
+                        "business_name": p.get("product_name"),
+                        "category": p.get("category_name"),
+                        "city": p.get("brand") or "Generic Brand",
+                        "phone_number": f"₹{p.get('price')}" if p.get("price") else "Price N/A",
+                        "rating": float(p.get("stars") or 0),
+                        "review_count": int(p.get("reviews") or 0),
+                        "image_url": p.get("img_url"),
+                        "website_url": p.get("product_url"),
+                        "business_description": p.get("description")
+                    })
+                    
+                summary_data = await anyio.to_thread.run_sync(
+                    generate_conversational_summary_and_chips, 
+                    req.query, 
+                    formatted_products, 
+                    lang, 
+                    chat_history
+                )
+                
+                resp = {
+                    "type": "database",
+                    "data": formatted_products,
+                    "intro": summary_data.get("summary", ""),
+                    "prompt": "Here are the top products I found:",
+                    "suggestions": [{"title": s, "action": "query_rewrite", "query": s} for s in summary_data.get("suggestions", [])],
+                    "search_metadata": {"offset": p_offset, "limit": p_limit}
+                }
+                if chat_session_id:
+                    _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
+                return resp
+                
+            except Exception as e:
+                print(f"[PRODUCT SEARCH ERROR] {e}")
+                resp = {"type": "faq", "data": "I encountered an error while searching for products."}
                 if chat_session_id:
                     _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
                 return resp
@@ -1815,13 +1963,14 @@ async def search(req: SearchRequest):
                     pass
             if not city:
                 try:
-                    conn = sqlite3.connect(DATABASE_URL)
-                    cur = conn.cursor()
-                    cur.execute("SELECT city, COUNT(*) as cnt FROM g_map_master_table WHERE city != '' GROUP BY city ORDER BY cnt DESC LIMIT 1")
-                    r = cur.fetchone()
-                    city = r[0].lower() if r else "surat"
-                    conn.close()
-                except:
+                    from mysql_pool import mysql_ctx
+                    with mysql_ctx() as conn:
+                        cur = conn.cursor()
+                        cur.execute("SELECT city_name FROM Top_cities_rank ORDER BY city_rank ASC LIMIT 1")
+                        r = cur.fetchone()
+                        city = r[0].lower() if r else "surat"
+                except Exception as e:
+                    print(f"Fallback city error: {e}")
                     city = "surat"
 
         # Map ranking/intent
@@ -1852,48 +2001,24 @@ async def search(req: SearchRequest):
                 limit=current_limit
             )
             
-            # Step 2: Enough Quality Results Check?
+            # Step 2: Ensure strictly Read-Only logic
             explicit_online = any(w in q_lower for w in ["online", "live", "web", "scrape", "internet", "google", "find online", "search online", "latest", "current", "real-time", "real time"])
             
-            # If results are insufficient (< 3 results) or explicit online request on page 0:
-            if (len(results) < 3 or explicit_online) and current_offset == 0:
-                try:
-                    from search_online import search_online_and_save
-                    search_term = category if category else "best businesses"
-                    scrape_q = f"{search_term} in {extracted_area + ', ' if extracted_area else ''}{city}"
-                    print(f"[HYBRID SEARCH] Results insufficient ({len(results)} matches). Triggering provider scraping for: '{scrape_q}'")
-                    
-                    # Search Online & validate & enrich & insert/update in Provider Layer
-                    online_results = await anyio.to_thread.run_sync(search_online_and_save, scrape_q)
-                    
-                    if online_results:
-                        load_cities_and_categories_cache()
-                        # Re-run Database Search to include the newly ingested online records
-                        results = query_local_businesses(
-                            category=category, 
-                            city=city, 
-                            area=extracted_area, 
-                            min_rating=None, 
-                            open_only=filters.get("open_now", False), 
-                            filters=filters, 
-                            ranking_intent=resolved_ranking,
-                            offset=current_offset, 
-                            limit=current_limit
-                        )
-                except Exception as scraping_err:
-                    print(f"[HYBRID SEARCH] Scraping failed: {scraping_err}")
+            if explicit_online and current_offset == 0:
+                resp = {
+                    "type": "faq",
+                    "data": "I am a strictly Read-Only AI assistant and only provide information from our verified local database. I cannot search the internet.",
+                    "suggestions": [{"title": "Search Local Listings 🏢", "action": "query_rewrite", "query": "Local Businesses"}]
+                }
+                if chat_session_id:
+                    _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
+                return resp
 
             if results or current_offset > 0:
                 mapped_results = map_business_fields(results)
                 total_count = count_local_businesses(category, city, area=extracted_area, filters=filters)
                 
-                # Check if it was a single business details request but found online
-                # If scraping found exactly one business and user searched specifically for a name
-                # Prompt to save / addition logic
                 pending_save = None
-                if len(mapped_results) == 1 and not results[0].get("owner_id") and explicit_online:
-                    # Keep this business pending addition
-                    pending_save = results[0]
 
                 # Step 3: Call OpenRouter for Conversational summary & contextual suggestion chips
                 summary_data = await anyio.to_thread.run_sync(
