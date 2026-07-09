@@ -59,7 +59,8 @@ export function useChatWizards({
   wizardData,
   setWizardData,
   pendingUpdateField,
-  setPendingUpdateField
+  setPendingUpdateField,
+  selectedBusiness
 }) {
   const [wizardStepsList, setWizardStepsList] = useState(ADD_BIZ_STEPS);
 
@@ -72,9 +73,11 @@ export function useChatWizards({
     addThinking();
     const finalData = { 
       ...data, 
-      business_id: session.businessId 
+      business_id: selectedBusiness?.global_business_id 
     };
     try {
+      console.log("Selected Business:", selectedBusiness);
+      console.log("Sending:", finalData);
       const res = await api.addProduct(finalData);
       removeThinking();
       setFlowMode('QUERY');
@@ -126,7 +129,6 @@ export function useChatWizards({
   const handleWizardSend = async (text, trans) => {
     const lang = currentLanguage || 'en';
     const cleanText = text.trim().toLowerCase();
-
     // Check for Resume Command
     if (cleanText === 'resume') {
       const saved = localStorage.getItem('resumable_wizard');
@@ -193,7 +195,7 @@ export function useChatWizards({
       }
 
       try {
-        const res = await api.updateBusiness(session.businessId, pendingUpdateField, text);
+        const res = await api.updateBusiness(selectedBusiness?.global_business_id || session.businessId, pendingUpdateField, text);
         removeThinking();
         
         if (res.success) {
@@ -312,23 +314,25 @@ export function useChatWizards({
       try {
         if (currentStep.key === 'email') {
           const res = await api.sendEmailOtp(text, "registration");
-          if (res && !res.success) {
+          if (!res.success) {
             setLocalMessages(prev => [...prev, {
               id: Date.now(),
               role: 'bot',
               type: 'text',
-              content: '⚠️ Note: Email delivery failed. Please use developer bypass code "1234" as your OTP.'
+              content: `❌ ${res.message}`
             }]);
+            return true;
           }
+          setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'otp', content: '📩 OTP sent successfully! Please enter the verification code sent to your email. If not recieved make sure you entered the right email or try resend OTP.' }]);
+
         } else if (currentStep.key === 'otp') {
           if (text.toLowerCase() === 'resend') {
             await api.sendEmailOtp(wizardData.email, "registration");
             setLocalMessages(prev => [...prev, {
               id: Date.now(),
               role: 'bot',
-              type: 'search_options',
-              content: '📩 Verification code has been resent to your email. Please enter the new code:',
-              labels: { resend: 'Resend OTP 🔄' }
+              type: 'otp',
+              content: '📩 Verification code has been resent to your email. Please enter the new code:'
             }]);
             removeThinking();
             return true;
@@ -366,15 +370,8 @@ export function useChatWizards({
           removeThinking();
           const nextBizStep = updatedSteps[nextStep];
           const nextPrompt = nextBizStep.promptKey ? (trans[nextBizStep.promptKey] || nextBizStep.promptKey) : nextBizStep.prompt;
-          if (nextBizStep.key === 'otp') {
-            setLocalMessages(prev => [...prev, {
-              id: Date.now(),
-              role: 'bot',
-              type: 'search_options',
-              content: nextPrompt,
-              labels: { resend: 'Resend OTP 🔄' }
-            }]);
-          } else {
+
+          if (nextBizStep.key !== 'otp') {
             setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: nextPrompt }]);
           }
         } else {
@@ -450,7 +447,7 @@ export function useChatWizards({
         } else {
           const finalData = { 
             ...updatedWizardData,
-            business_id: session.businessId
+            business_id: selectedBusiness?.global_business_id
           };
           console.log("Submitting Deal:", JSON.stringify(finalData));
           const res = await api.addDeal(finalData);
@@ -486,14 +483,16 @@ export function useChatWizards({
       removeThinking();
       setFlowMode('QUERY');
       if (res.success) {
-        setSession({
+        const updatedSession = {
+          ...session,
           type: 'BUSINESS',
-          phone: finalData.phone || session.phone,
-          email: finalData.email || session.email,
           businessId: res.id,
           businessName: finalData.name,
           city: finalData.city
-        });
+        }
+        setSession(updatedSession);
+        localStorage.setItem("session", JSON.stringify(updatedSession));;
+        
         setIsLoggedIn?.(true);
         setQuickActionsView('main');
         setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.business_added }]);

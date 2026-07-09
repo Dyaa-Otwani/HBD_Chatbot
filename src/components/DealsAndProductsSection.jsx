@@ -22,7 +22,7 @@ export default function DealsAndProductsSection({ businessId, isLoggedIn, sessio
   const [newPhotoUrl, setNewPhotoUrl] = useState('');
   const [submittingPhoto, setSubmittingPhoto] = useState(false);
 
-  const isOwner = isLoggedIn && session?.type === 'BUSINESS' && Number(session?.businessId) === Number(businessId);
+  const isOwner = isLoggedIn && Number(session?.Id) === Number(ownerId);
 
   useEffect(() => {
     fetchData();

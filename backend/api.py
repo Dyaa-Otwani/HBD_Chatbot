@@ -123,6 +123,7 @@ class SearchRequest(BaseModel):
     language: Optional[str] = "en"
     session: Optional[dict] = None
     session_id: Optional[str] = None  # Chat session ID for memory
+    business_id: Optional[int] = None    
 
 class ChatSessionCreate(BaseModel):
     user_id: Optional[str] = None  # phone or email
@@ -154,7 +155,7 @@ class BusinessAddRequest(BaseModel):
     language: Optional[str] = "en"
 
 class AddProductRequest(BaseModel):
-    business_id: Optional[int] = None
+    business_id: int | None = None
     name: str
     price: Optional[float] = None
     description: Optional[str] = ""
@@ -162,7 +163,7 @@ class AddProductRequest(BaseModel):
     image_url: Optional[str] = ""
 
 class AddDealRequest(BaseModel):
-    business_id: Optional[int] = None
+    business_id: int | None = None
     title: str
     discount_pct: Optional[int] = None
     expiry_date: str
@@ -696,6 +697,13 @@ def send_smtp_otp(receiver_email, otp_code, type="login"):
 @app.post("/api/send-otp")
 def send_otp_email(req: dict):
     email = req.get("email")
+    import re
+    email_regex = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
+    if not re.match(email_regex, email):
+        return {
+            "success": False,
+            "message": "Please enter a valid email address."
+        }
     type = req.get("type", "login")
     if not email: return {"success": False, "message": "Missing email"}
     
@@ -712,7 +720,7 @@ def send_otp_email(req: dict):
 
     try:
         send_smtp_otp(email, otp, type)
-        return {"success": True, "message": "OTP sent to your email!"}
+        return {"success": True, "message": "📩 OTP Sent!\n We've sent a verification code to your email.\nPlease enter the OTP below.\nDidn't receive it?\n🔄 Resend OTP"}
     except Exception as e:
         print(f"SMTP Error: {e}")
         try:
@@ -723,7 +731,7 @@ def send_otp_email(req: dict):
             }
         except Exception:
             pass
-        return {"success": False, "message": f"Failed to send email. Ensure App Password is correct. (Dev Hint: 1234)"}
+        return {"success": False, "message": f"Couldn't send the verification email. Please check the email address and try again "}
 
 @app.post("/api/verify-otp")
 def verify_otp_email(req: dict):
@@ -1555,13 +1563,20 @@ async def search(req: SearchRequest):
                         _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
                     return resp
                 
+                mapped = map_business_fields(raw_matches)
                 biz_row = raw_matches[0]
+
                 results = map_business_fields([biz_row])
                 
                 if "manage product" in q_lower or "show product" in q_lower:
                     with db_context() as conn:
                         cur = conn.cursor()
-                        cur.execute("SELECT * FROM products WHERE business_id = ?", (biz_row.get("global_business_id"),))
+                        selected_business_id = req.business_id
+                        if not selected_business_id:
+                            raise HTTPException(400, "No business selected.")
+                        
+                        cur.execute( "SELECT * FROM products WHERE business_id = ?", (selected_business_id,))
+
                         items = [dict(r) for r in cur.fetchall()]
                     if not items:
                         resp = {"type": "faq", "data": "You haven't added any products yet. Click 'Add Product' to start!"}
@@ -1573,7 +1588,12 @@ async def search(req: SearchRequest):
                 elif "manage deal" in q_lower or "show deal" in q_lower:
                     with db_context() as conn:
                         cur = conn.cursor()
-                        cur.execute("SELECT * FROM deals WHERE business_id = ?", (biz_row.get("global_business_id"),))
+                        selected_business_id = req.business_id
+                        if not selected_business_id:
+                            raise HTTPException(400, "No business selected.")
+                        
+                        cur.execute( "SELECT * FROM deals WHERE business_id = ?", (selected_business_id,))
+                        
                         items = [dict(r) for r in cur.fetchall()]
                     if not items:
                         resp = {"type": "faq", "data": "You haven't added any deals yet. Click 'Add Deal' to start!"}
@@ -1583,7 +1603,7 @@ async def search(req: SearchRequest):
                         _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
                     return resp
                 elif "show" in q_lower:
-                    mapped = map_business_fields([biz_row])[0]
+                    mapped = map_business_fields(raw_matches)
                     fields = [
                         ("name", "Business Name"), ("category", "Category"),
                         ("phone_number", "Phone"), ("address", "Address"),
@@ -1604,10 +1624,8 @@ async def search(req: SearchRequest):
                     suggs.sort(key=lambda x: not x["is_missing"])
                     resp = {
                         "type": "database",
-                        "data": [mapped],
-                        "intro": f"Here is the business registered with your account:",
-                        "prompt": "Tap any field below to update your profile:",
-                        "suggestions": suggs
+                        "data": mapped,
+                        "intro": f"The businesses registered with your account:"
                     }
                     if chat_session_id:
                         _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
@@ -1631,12 +1649,17 @@ async def search(req: SearchRequest):
                             "is_missing": is_miss
                         })
                     suggs.sort(key=lambda x: not x["is_missing"])
-                    resp = {"type": "suggestions", "intro": lang_fetch("update_prompt", lang), "content": suggs}
+                    resp = {
+                        "type": "database",
+                        "data": mapped,
+                        "intro": "Which business would you like to update?",
+                        "mode": "update_select"
+                    }
                     if chat_session_id:
                         _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
                     return resp
             except Exception as e:
-                return {"type": "faq", "data": "I had trouble finding your business. Please ensure you are logged in."}
+                return {"type": "faq", "data": "I had trouble finding your business. Please ensure you are logged in and have added your business."}
 
         # --- Legacy Quick Command Shortcuts ---
         cmd_map = {
@@ -1994,6 +2017,7 @@ def update_biz(business_id: int, req: UpdateRequest, payload: dict = Depends(get
 @app.post("/api/business")
 def add_biz(req: BusinessAddRequest, payload: dict = Depends(get_authenticated_user)):
     user_id = payload.get("id")
+    print("JWT PAYLOAD:", payload)
     try:
         from datetime import datetime
         print(f"DEBUG: add_biz request: {req.dict()}")
@@ -2105,7 +2129,8 @@ def add_product(req: AddProductRequest, payload: dict = Depends(get_authenticate
             raise HTTPException(403, "You do not have permission to manage products for this business listing.")
     try:
         from datetime import datetime
-        print(f"DEBUG add_product: business_id={req.business_id}, name={req.name}, price={req.price}, category={req.category}")
+        print("FULL REQUEST:", req.dict())
+        # print(f"DEBUG add_product: business_id={req.business_id}, name={req.name}, price={req.price}, category={req.category}")
         with db_context() as conn:
             cur = conn.cursor()
             created_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")

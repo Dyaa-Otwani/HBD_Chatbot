@@ -9,6 +9,10 @@ import api from '../services/api';
 import ReviewSection from './ReviewSection';
 import DealsAndProductsSection from './DealsAndProductsSection';
 
+export const ADD_BIZ_STEPS = [
+  { key: 'otp', promptKey: 'prompt_otp' }
+];
+
 // Safe inline markdown renderer (no dangerouslySetInnerHTML)
 function MarkdownText({ text }) {
   if (!text) return null;
@@ -286,8 +290,13 @@ function getOpeningStatus(openingHours, category) {
 // ─────────────────────────────────────────────────────────
 // BUSINESS CARD
 // ─────────────────────────────────────────────────────────
-function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
-  const isOwner = isLoggedIn && session?.type === 'BUSINESS' && Number(session?.businessId) === Number(biz.global_business_id);
+function BusinessCard({ biz, onAction, isLoggedIn, session, compareList, mode }) {
+  console.log("SESSION =", session);
+  console.log("SESSION ID =", session?.id);
+  console.log("OWNER ID =", biz.owner_id);
+  console.log("IS LOGGED IN =", isLoggedIn);
+  const isOwner = isLoggedIn && Number(session?.id) === Number(biz.owner_id);
+  console.log("IS OWNER =", isOwner);
   const avatarStyle = getAvatarStyle(biz.business_name || 'B');
   const coverStyle = getAvatarStyle((biz.business_name || 'B') + "_cover");
   const firstLetter = String(biz.business_name || 'B').trim().charAt(0).toUpperCase();
@@ -381,7 +390,14 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
   };
 
   return (
-    <div className="biz-card" style={{
+    <div className="biz-card" 
+    onClick={(e) => {
+      if (e.target.closest("button")) return;
+      if (mode === "update_select") {
+        onAction("select_business_for_update", biz);
+      }
+    }} style={{
+      cursor: mode === "update_select" ? "pointer" : "default",
       background: 'var(--bg-surface)',
       border: '1px solid var(--border-subtle)',
       borderRadius: 'var(--radius-lg)',
@@ -757,7 +773,7 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <button
-              onClick={() => onAction('start_add_product')}
+              onClick={() => onAction('start_add_product', biz)}
               style={{
                 padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border-subtle)',
                 background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '0.75rem',
@@ -770,7 +786,7 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
               📦 Add Product
             </button>
             <button
-              onClick={() => onAction('start_add_deal')}
+              onClick={() => onAction('start_add_deal', biz)}
               style={{
                 padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border-subtle)',
                 background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '0.75rem',
@@ -783,7 +799,7 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
               🏷️ Add Deal
             </button>
             <button
-              onClick={() => onAction('manage_products')}
+              onClick={() => onAction('manage_products', biz)}
               style={{
                 padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border-subtle)',
                 background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '0.75rem',
@@ -796,7 +812,7 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
               📋 Manage Products
             </button>
             <button
-              onClick={() => onAction('manage_deals')}
+              onClick={() => onAction('manage_deals', biz)}
               style={{
                 padding: '7px 8px', borderRadius: 8, border: '1px solid var(--border-subtle)',
                 background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '0.75rem',
@@ -811,7 +827,7 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 4 }}>
             <button
-              onClick={() => onAction('update')}
+              onClick={() => onAction('update', biz)}
               style={{
                 padding: '7px 8px', borderRadius: 8, border: '1px solid #a7f3d0',
                 background: '#ecfdf5', color: '#047857', fontSize: '0.75rem',
@@ -898,7 +914,9 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList }) {
 // ─────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────
+
 const MessageItem = ({ message, onAction, isLoggedIn, session, language = 'en', compareList }) => {
+  console.log(message);
   const isBot = message.role === 'bot';
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activeImage, setActiveImage] = useState(null);
@@ -1187,6 +1205,50 @@ const MessageItem = ({ message, onAction, isLoggedIn, session, language = 'en', 
     );
   }
 
+  // __ Resend OTP ________________________________________
+  if (message.type === 'otp') {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 12 }}>
+        <div className="chat-bubble-bot">
+          <div style={{ marginBottom: 10 }}>
+            {message.content}
+          </div>
+
+          <button
+            onClick={() => onAction('resend_otp')}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: '1px solid var(--color-primary)',
+              background: 'blue',
+              cursor: 'pointer',
+              gap: '10px',
+              margin: '10px',
+              fontWeight: 600
+            }}
+          >
+            🔄 Resend OTP
+          </button>
+          <button
+            onClick={() => onAction('change_email')}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: '1px solid var(--color-primary)',
+              background: 'blue',
+              cursor: 'pointer',
+              gap: '10px',
+              margin:'10px',
+              fontWeight: 600
+            }}
+            >
+            ✏️ Change Email
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ── AUTH PROMPT ───────────────────────────────────────
   if (message.type === 'auth_prompt') {
     return (
@@ -1237,7 +1299,7 @@ const MessageItem = ({ message, onAction, isLoggedIn, session, language = 'en', 
           marginBottom: 10
         }}>
           {items.map((biz, idx) => (
-            <BusinessCard key={biz.global_business_id || idx} biz={biz} onAction={onAction} isLoggedIn={isLoggedIn} session={session} compareList={compareList} />
+            <BusinessCard key={biz.global_business_id || idx} biz={biz} onAction={onAction} isLoggedIn={isLoggedIn} session={session} compareList={compareList} mode={message.mode} />
           ))}
         </div>
 

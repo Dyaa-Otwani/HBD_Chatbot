@@ -35,6 +35,7 @@ def row_to_dict(row_dict):
         "area": row_dict.get("area"),
         "city": row_dict.get("city"),
         "state": row_dict.get("state"),
+        "owner_id": row_dict.get("owner_id"),
         "email": row_dict.get("email")
     }
 
@@ -52,16 +53,15 @@ def get_businesses_by_phone(phone: str):
         f"""
         SELECT * FROM {BIZ_TABLE}
         WHERE REPLACE(phone_number, ' ', '') LIKE ?
-        LIMIT 1
+        ORDER BY global_business_id DESC
         """,
         (f"%{search_phone}%",)
     )
 
-    row = cursor.fetchone()
-    if row:
-        result = row_to_dict(dict(row))
+    rows = cursor.fetchall()
+    if rows:
         conn.close()
-        return [result]
+        return [row_to_dict(dict(r)) for r in rows]
 
     conn.close()
     
@@ -157,16 +157,15 @@ def get_businesses_by_email(email: str):
         f"""
         SELECT * FROM {BIZ_TABLE}
         WHERE LOWER(email) = ?
-        LIMIT 1
+        ORDER BY global_business_id DESC
         """,
         (email,)
     )
 
-    row = cursor.fetchone()
-    if row:
-        result = row_to_dict(dict(row))
+    rows = cursor.fetchall()
+    if rows:
         conn.close()
-        return [result]
+        return [row_to_dict(dict(r)) for r in rows]
 
     conn.close()
     

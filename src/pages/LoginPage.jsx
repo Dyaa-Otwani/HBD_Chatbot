@@ -133,6 +133,8 @@ export default function LoginPage(props) {
         } else {
           // Merchant exists but has no business registered yet
           const sessionData = {
+            id: user.id,
+            role: user.role,
             type: 'BUSINESS',
             businessId: null,
             city: null,
@@ -158,6 +160,8 @@ export default function LoginPage(props) {
     } else {
       // Customer / User role
       const sessionData = {
+        id: user.id,
+        role: user.role,
         type: 'USER',
         phone: user.phone,
         email: user.email,

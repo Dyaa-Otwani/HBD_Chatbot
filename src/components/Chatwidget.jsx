@@ -129,10 +129,15 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
         const stepList = flowMode === 'ADD_WIZARD' ? ADD_BIZ_STEPS : (flowMode === 'ADD_PRODUCT' ? getAddProductSteps(trans) : getAddDealSteps(trans));
         const prevStep = stepList[wizardStep - 1];
         setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: prevStep.prompt || trans[prevStep.promptKey] || prevStep.promptKey }])
+        console.log("FLOW MODE:", flowMode);
+        console.log("STEP:", wizardStep);
+        console.log("CURRENT:", currentStep.key);
+        console.log("INPUT:", text);
       } else {
         setFlowMode('QUERY')
         setQuickActionsView(isLoggedIn ? 'main' : 'welcome_screen')
       }
+      console.log("Leaving wizard...");
       return
     }
 
@@ -492,7 +497,7 @@ const ChatWidget = ({ onClose, initialQuery, onClearInitialQuery, initialAction,
           session_id: currentSessionId 
         })
         removeThinking()
-        setLocalMessages(prev => [...prev, { id: Date.now(), role: 'suggestions', content: data.content, intro: data.intro }])
+        setLocalMessages(prev => [...prev,{ id: Date.now(), role: 'bot', type: 'suggestions', intro: data.intro, suggestions: data.suggestions || data.content}])
       } catch(e) { removeThinking() }
     }
     if (action === 'update_specific') {

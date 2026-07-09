@@ -235,13 +235,15 @@ def summarize_history(history: list, language: str = "en") -> str:
         content = clean_history_message(role, h.get("content", ""))
         formatted.append(f"{role.upper()}: {content}")
     
+    conversation = "\n".join(formatted)
+
     prompt = f"""
     Summarize the following chat conversation history between User and Assistant.
     Provide a concise 2-3 sentence summary of the key context, user requests, and current status of the conversation.
     Respond in {language.upper()} preferred language.
     
     CONVERSATION:
-    {"\n".join(formatted)}
+    {conversation}
     """
     try:
         res = call_llm(messages=[{"role": "user", "content": prompt}], model=MODEL)

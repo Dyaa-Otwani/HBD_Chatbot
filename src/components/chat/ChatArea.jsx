@@ -66,6 +66,8 @@ const ChatArea = (props) => {
   const [thinkingStatus, setThinkingStatus] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef(null);
+  const [selectedBusiness, setSelectedBusiness] = useState(null);
+  const [otpResent, setOtpResent] = useState(false);
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -86,6 +88,7 @@ const ChatArea = (props) => {
     wizardStep, setWizardStep,
     wizardData, setWizardData,
     pendingUpdateField, setPendingUpdateField,
+    selectedBusiness,
   });
 
   // ── SCROLL TO BOTTOM ─────────────────────────────────
@@ -487,7 +490,7 @@ const ChatArea = (props) => {
       setLocalMessages(prev => [...prev, {
         id: Date.now(), role: 'bot', type: responseType,
         content: data.data || data.content || (trans.fallback_response || 'I am not sure about that.'),
-        intro: data.intro, suggestions: data.suggestions, prompt: data.prompt,
+        intro: data.intro, suggestions : data.suggestions, prompt: data.prompt,
       }]);
     } catch (e) {
       clearInterval(statusInterval);
@@ -526,6 +529,7 @@ const ChatArea = (props) => {
 
   // ── ACTION HANDLER ────────────────────────────────────
   const handleAction = async (action, payload) => {
+    console.log(action);
     // Reset wizard states if starting a new top-level action
     if (['search', 'update', 'add_new_business', 'search_method', 'search_by_name', 'search_by_address', 'start_add_product', 'start_add_deal', 'reset_chat', 'login_trigger'].includes(action)) {
       setFlowMode('QUERY');
@@ -628,7 +632,7 @@ const ChatArea = (props) => {
     if (action === 'search_by_name') { setFlowMode('SEARCH_NAME'); setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.search_prompt }]); }
     if (action === 'search_by_address') { setFlowMode('SEARCH_ADDR'); setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.address_prompt }]); }
     if (action === 'add_new_business') {
-      wizards.setWizardStepsList(ADD_BIZ_STEPS);
+      wizards.setWizardStep(ADD_BIZ_STEPS);
       setFlowMode('ADD_WIZARD'); setWizardStep(0);
       const initialData = {};
       if (session.phone) initialData.phone = session.phone;
@@ -636,21 +640,73 @@ const ChatArea = (props) => {
       setWizardData(initialData);
       setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: trans.prompt_phone }]);
     }
+    
+    if (action === 'resend_otp') {
+      setOtpResent(true);
+      await handleSend(null, 'resend');
+      setTimeout(() => setOtpResent(false), 2000);
+      return;
+    }
+
+    if (action === 'change_email') {
+      setWizardData(prev => ({...prev, email: ''}));
+      setWizardStep(1);
+      setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: '📧 Please enter your email address again.'}]);
+      return;
+    }
 
     if (action === 'start_add_product') {
-      if (!session.businessId) return setShowLoginPopup(true);
+      const business = payload || selectedBusiness;
+      if (!business) {
+        return setShowLoginPopup(true);
+      }
+      setSelectedBusiness(business);
       const steps = getAddProductSteps(trans);
-      setFlowMode('ADD_PRODUCT'); setWizardStep(0); setWizardData({});
-      setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: steps[0].prompt }]);
+      setFlowMode('ADD_PRODUCT');
+      setWizardStep(0);
+      setWizardData({
+        business_id: business.global_business_id,
+        business_name: business.business_name
+      });
+      setLocalMessages(prev => [
+        ...prev,
+        {
+            id: Date.now(),
+            role: 'bot',
+            type: 'text',
+            content: steps[0].prompt
+        }
+      ]);
       return;
     }
+
     if (action === 'start_add_deal') {
-      if (!session.businessId) return setShowLoginPopup(true);
+      const business = payload || selectedBusiness;
+      if (!business) {
+        return setShowLoginPopup(true);
+      }
+      setSelectedBusiness(business);
       const steps = getAddDealSteps(trans);
-      setFlowMode('ADD_DEAL'); setWizardStep(0); setWizardData({});
-      setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: 'text', content: steps[0].prompt }]);
+
+      setFlowMode('ADD_DEAL');
+      setWizardStep(0);
+      setWizardData({
+        business_id: business.global_business_id,
+        business_name: business.business_name
+      });
+      setLocalMessages(prev => [
+        ...prev,
+        {
+            id: Date.now(),
+            role: 'bot',
+            type: 'text',
+            content: steps[0].prompt
+        }
+      ]);
+
       return;
     }
+
     if (action === 'reset_chat') { setShowResetConfirm(true); return; }
     if (action === 'confirm_reset') {
       if (currentSessionId && getUserId()) {
@@ -684,15 +740,37 @@ const ChatArea = (props) => {
       } catch { setThinkingStatus(''); removeThinking(); toast?.error('Error loading business'); }
     }
     if (action === 'update') {
-      setThinkingStatus('Preparing business update wizard...');
+      //Admin dashboard update
+      if (payload) {
+        setSelectedBusiness(payload);
+        const fields = [ "Business Name", "Category", "Phone Number", "Address", "Area", "City", "State", "Website"];
+        setLocalMessages(prev => [...prev, { id: Date.now(), role: "bot", type: "suggestions",
+        intro: `✏️ Updating: ${payload.business_name}\n\n What would you like to update?`, content: fields.map(f => ({ title: `Update ${f}`, action: `Update ${f}` }))}
+        ]);
+        return;
+      }
+
+      // Existing quick-action flow
+      setThinkingStatus('Loading your businesses...');
       addThinking();
       try {
-        const data = await api.query({ query: 'update my business', session, language: lang, session_id: currentSessionId });
-        setThinkingStatus('');
+        const data = await api.query({ query: 'update my business', session, language: lang, session_id: currentSessionId});
         removeThinking();
-        setLocalMessages(prev => [...prev, { id: Date.now(), role: 'suggestions', content: data.content, intro: data.intro }]);
-      } catch { removeThinking(); }
+        setLocalMessages(prev => [...prev, { id: Date.now(), role: 'bot', type: data.type, content: data.data, intro: data.intro, mode: data.mode }]);
+      } catch (e) {
+        removeThinking();
+      }
+      return;
     }
+    
+    if (action === 'select_business_for_update') {
+      setSelectedBusiness(payload);
+      const fields = [ "Business Name", "Category", "Phone Number", "Address", "Area", "City", "State", "Website" ];
+      setLocalMessages(prev => [...prev, { id: Date.now(), role: "bot", type: "suggestions", intro: `✏️Updating: ${payload.business_name}\n\n What would you like to update?`, content: fields.map(f => ({ title: `Update ${f}`, action: `Update ${f}`})) 
+      }]);
+      return;
+    }
+
     if (action === 'update_specific') {
       const field = payload;
       setPendingUpdateField(field);
@@ -718,7 +796,8 @@ const ChatArea = (props) => {
     if (action === 'manage_products') {
       addThinking();
       try {
-        const data = await api.query({ query: 'manage product', session, language: lang, session_id: currentSessionId });
+        const business = payload || selectedBusiness;
+        const data = await api.query({ query: 'manage product', business_id: business.global_business_id, session, language: lang, session_id: currentSessionId });
         removeThinking();
         setLocalMessages(prev => [...prev, {
           id: Date.now(), role: 'bot',
@@ -731,7 +810,7 @@ const ChatArea = (props) => {
     if (action === 'manage_deals') {
       addThinking();
       try {
-        const data = await api.query({ query: 'manage deal', session, language: lang, session_id: currentSessionId });
+        const data = await api.query({ query: 'manage deal', business_id: business.global_business_id, session, language: lang, session_id: currentSessionId });
         removeThinking();
         setLocalMessages(prev => [...prev, {
           id: Date.now(), role: 'bot',

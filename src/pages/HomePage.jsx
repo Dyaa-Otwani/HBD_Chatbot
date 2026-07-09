@@ -413,7 +413,7 @@ export default function HomePage({ toast }) {
             </p>
           </div>
           <button
-            onClick={() => goToChat('add my business')}
+            onClick={() => navigate('/chat?action=add_new_business')}
             style={{
               padding: '12px 24px', borderRadius: 'var(--radius-md)',
               background: 'white', color: '#4f46e5',

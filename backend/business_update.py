@@ -66,6 +66,7 @@ def update_business(business_id: int, updates: dict):
                 "INSERT INTO update_history (business_id, field_name, old_value, new_value) VALUES (?, ?, ?, ?)",
                 (business_id, field, str(old_val), str(value))
             )
+            print("Rows updated:", cursor.rowcount)
         except Exception as e:
             print(f"History log error: {e}")
     
