@@ -11,10 +11,10 @@ sqlite_cur = sqlite_conn.cursor()
 # MySQL Connection
 # ----------------------------
 mysql_conn = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="MySql@2026",      # <-- Change this
-    database="hbd_chatbot"
+    host="YOUR_HOST",
+    user="YOUR_USER",
+    password="YOUR_PASSWORD",
+    database="YOUR_DATABASE"
 )
 
 mysql_cur = mysql_conn.cursor()
