@@ -291,12 +291,7 @@ function getOpeningStatus(openingHours, category) {
 // BUSINESS CARD
 // ─────────────────────────────────────────────────────────
 function BusinessCard({ biz, onAction, isLoggedIn, session, compareList, mode }) {
-  console.log("SESSION =", session);
-  console.log("SESSION ID =", session?.id);
-  console.log("OWNER ID =", biz.owner_id);
-  console.log("IS LOGGED IN =", isLoggedIn);
   const isOwner = isLoggedIn && Number(session?.id) === Number(biz.owner_id);
-  console.log("IS OWNER =", isOwner);
   const avatarStyle = getAvatarStyle(biz.business_name || 'B');
   const coverStyle = getAvatarStyle((biz.business_name || 'B') + "_cover");
   const firstLetter = String(biz.business_name || 'B').trim().charAt(0).toUpperCase();
@@ -753,6 +748,7 @@ function BusinessCard({ biz, onAction, isLoggedIn, session, compareList, mode })
         {showDealsAndProducts && (
           <DealsAndProductsSection 
             businessId={biz.global_business_id}
+            ownerId={biz.owner_id}
             isLoggedIn={isLoggedIn}
             session={session}
           />
@@ -1493,7 +1489,7 @@ const MessageItem = ({ message, onAction, isLoggedIn, session, language = 'en', 
               </div>
             </div>
             <button
-              onClick={() => onAction('delete_product', p.id)}
+              onClick={() => onAction('delete_product', p.global_product_id)}
               title="Delete Product"
               style={{ padding: 8, borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', transition: 'all var(--transition-fast)' }}
               onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-error)'; e.currentTarget.style.background = 'var(--color-error-light)'; }}
@@ -1552,7 +1548,7 @@ const MessageItem = ({ message, onAction, isLoggedIn, session, language = 'en', 
               </div>
             </div>
             <button
-              onClick={() => onAction('delete_deal', d.id)}
+              onClick={() => onAction('delete_deal', d.global_deal_id)}
               title="Delete Deal"
               style={{ padding: 8, borderRadius: 8, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', transition: 'all var(--transition-fast)' }}
               onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-error)'; e.currentTarget.style.background = 'var(--color-error-light)'; }}

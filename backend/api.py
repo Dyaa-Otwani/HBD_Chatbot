@@ -20,6 +20,7 @@ import random
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+
 load_dotenv()
 
 # Ensure static directory exists
@@ -46,7 +47,7 @@ print(f"[DB] SQLite (app data): {DATABASE_URL}")
 try:
     conn = sqlite3.connect(DATABASE_URL)
     conn.execute("""
-    CREATE TABLE IF NOT EXISTS bookmarks (
+    CREATE TABLE IF NOT EXISTS chatbot_bookmarks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
         business_id INTEGER,
@@ -64,7 +65,7 @@ except Exception as startup_err:
 try:
     conn = sqlite3.connect(DATABASE_URL)
     conn.execute('''
-    CREATE TABLE IF NOT EXISTS reviews (
+    CREATE TABLE IF NOT EXISTS chatbot_reviews (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         business_id INTEGER NOT NULL,
         user_id TEXT NOT NULL,
@@ -92,7 +93,7 @@ except Exception as startup_err:
 try:
     conn = sqlite3.connect(DATABASE_URL)
     conn.execute('''
-    CREATE TABLE IF NOT EXISTS business_photos (
+    CREATE TABLE IF NOT EXISTS chatbot_business_photos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         business_id INTEGER NOT NULL,
         photo_url TEXT NOT NULL,
@@ -347,7 +348,9 @@ def lang_fetch(key, lang="en"):
     return eng_val
 
 # Table name constant
-BIZ_TABLE = "master_table"  # MySQL remote table
+BIZ_TABLE = "chatbot_add_business"  # MySQL remote table
+PRODUCT_TABLE = "chatbot_products"
+DEAL_TABLE = "chatbot_deals"
 
 # Helper: Map DB to Frontend
 def map_business_fields(biz_list):
@@ -404,6 +407,7 @@ def map_product_fields(prod_list):
             "description": prod.get("description")
         }
         mapped_list.append(mapped)
+    print(mapped)
     return mapped_list
 
 
@@ -1490,7 +1494,6 @@ async def search(req: SearchRequest):
 
         # --- RIGID CHATBOT FLOW INTERCEPTS (Direct MySQL Queries) ---
         if q_lower in ["explore listings", "top rated businesses"]:
-            from mysql_pool import mysql_ctx
             with mysql_ctx() as conn:
                 cur = conn.cursor(dictionary=True)
                 # Fetch Top Rated Businesses from master_table
@@ -1511,7 +1514,6 @@ async def search(req: SearchRequest):
             return resp
 
         if q_lower in ["browse products", "trending products"]:
-            from mysql_pool import mysql_ctx
             with mysql_ctx() as conn:
                 cur = conn.cursor(dictionary=True)
                 cur.execute("SELECT * FROM product_master WHERE stars IS NOT NULL ORDER BY stars DESC LIMIT 5")
@@ -1530,7 +1532,6 @@ async def search(req: SearchRequest):
             return resp
 
         if q_lower == "browse categories":
-            from mysql_pool import mysql_ctx
             with mysql_ctx() as conn:
                 cur = conn.cursor(dictionary=True)
                 cur.execute("SELECT category_name FROM Top_categories_rank ORDER BY category_rank ASC LIMIT 15")
@@ -1546,7 +1547,6 @@ async def search(req: SearchRequest):
             return resp
 
         if q_lower in ["browse locations", "top cities", "top cities 📍"]:
-            from mysql_pool import mysql_ctx
             with mysql_ctx() as conn:
                 cur = conn.cursor(dictionary=True)
                 cur.execute("SELECT city_name FROM Top_cities_rank ORDER BY city_rank ASC LIMIT 15")
@@ -1620,6 +1620,7 @@ async def search(req: SearchRequest):
             "manage product", "manage products",
             "manage deal", "manage deals"
         ])
+
         if is_my_biz_query:
             if not session_phone and not session_email:
                 resp = {"type": "faq", "data": "Please login with your mobile number or email to manage your business profile. Click 'Login' at the top!"}
@@ -1640,17 +1641,25 @@ async def search(req: SearchRequest):
                 biz_row = raw_matches[0]
 
                 results = map_business_fields([biz_row])
-                
                 if "manage product" in q_lower or "show product" in q_lower:
-                    with db_context() as conn:
-                        cur = conn.cursor()
+                    with mysql_ctx() as conn:
+                        cur = conn.cursor(dictionary=True)
+                        print("REQ BUSINESS ID:", req.business_id)
                         selected_business_id = req.business_id
                         if not selected_business_id:
                             raise HTTPException(400, "No business selected.")
                         
-                        cur.execute( "SELECT * FROM products WHERE business_id = ?", (selected_business_id,))
-
-                        items = [dict(r) for r in cur.fetchall()]
+                        print("Querying:", PRODUCT_TABLE)
+                        print("Business ID:", selected_business_id)
+                        cur.execute( f"SELECT * FROM {PRODUCT_TABLE} WHERE business_id = %s", (selected_business_id,))
+                        
+                        items = cur.fetchall()
+                        for item in items:
+                            if item.get("price") is not None:
+                                item["price"] = float(item["price"])
+                            if item.get("created_at"):
+                                item["created_at"] = item["created_at"].isoformat()
+                        print("Products found:", items)
                     if not items:
                         resp = {"type": "faq", "data": "You haven't added any products yet. Click 'Add Product' to start!"}
                     else:
@@ -1659,15 +1668,20 @@ async def search(req: SearchRequest):
                         _save_chat_message(chat_session_id, "assistant", json.dumps(resp))
                     return resp
                 elif "manage deal" in q_lower or "show deal" in q_lower:
-                    with db_context() as conn:
-                        cur = conn.cursor()
+                    with mysql_ctx() as conn:
+                        cur = conn.cursor(dictionary=True)
                         selected_business_id = req.business_id
                         if not selected_business_id:
                             raise HTTPException(400, "No business selected.")
                         
-                        cur.execute( "SELECT * FROM deals WHERE business_id = ?", (selected_business_id,))
+                        cur.execute( f"SELECT * FROM {DEAL_TABLE} WHERE business_id = %s", (selected_business_id,))
                         
-                        items = [dict(r) for r in cur.fetchall()]
+                        items = cur.fetchall()
+                        for item in items:
+                            if item.get("expiry_date"):
+                                item["expiry_date"] = item["expiry_date"].isoformat()
+                            if item.get("created_at"):
+                                item["created_at"] = item["created_at"].isoformat()
                     if not items:
                         resp = {"type": "faq", "data": "You haven't added any deals yet. Click 'Add Deal' to start!"}
                     else:
@@ -1752,7 +1766,6 @@ async def search(req: SearchRequest):
             biz_names = [n.strip() for n in biz_names if n.strip()]
             
             matched_listings = []
-            from mysql_pool import mysql_ctx
             with mysql_ctx() as conn:
                 cur = conn.cursor(dictionary=True)
                 for name in biz_names[:3]: # Compare up to 3
@@ -1793,7 +1806,6 @@ async def search(req: SearchRequest):
             # Clean up
             biz_name_candidate = re.sub(r'\b(what is the|show the|find the)\b', '', biz_name_candidate).strip()
             
-            from mysql_pool import mysql_ctx
             with mysql_ctx() as conn:
                 cur = conn.cursor(dictionary=True)
                 cur.execute("SELECT * FROM master_table WHERE LOWER(business_name) LIKE %s LIMIT 1", (f"%{biz_name_candidate}%",))
@@ -1833,7 +1845,6 @@ async def search(req: SearchRequest):
             p_limit = entities.get("limit") or 10
             p_offset = 0
             try:
-                from mysql_pool import mysql_ctx
                 with mysql_ctx() as (conn, cur):
                     query_str = "SELECT * FROM product_master WHERE 1=1"
                     params = []
@@ -1986,7 +1997,6 @@ async def search(req: SearchRequest):
                     pass
             if not city:
                 try:
-                    from mysql_pool import mysql_ctx
                     with mysql_ctx() as conn:
                         cur = conn.cursor()
                         cur.execute("SELECT city_name FROM Top_cities_rank ORDER BY city_rank ASC LIMIT 1")
@@ -2130,16 +2140,16 @@ async def search(req: SearchRequest):
 @app.put("/api/business/{business_id}")
 def update_biz(business_id: int, req: UpdateRequest, payload: dict = Depends(get_authenticated_user)):
     user_id = payload.get("id")
-    with db_context() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT owner_id FROM g_map_master_table WHERE global_business_id = ?", (business_id,))
+    with mysql_ctx() as conn:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT owner_id FROM chatbot_add_business WHERE global_business_id = %s", (business_id,))
         row = cur.fetchone()
-        if row and row[0] and row[0] != user_id:
-            raise HTTPException(403, "You do not have permission to modify this business listing.")
+        if row and row["owner_id"] and row["owner_id"] != user_id:
+            raise HTTPException(403, "You do not have permission to update this business.")
     try:
         from business_update import update_business
         update_business(business_id, {req.field: req.value})
-        log_audit_action(user_id, "UPDATE", "g_map_master_table", business_id, "system")
+        log_audit_action(user_id, "UPDATE", "chatbot_add_business", business_id, "system")
         return {"success": True}
     except Exception as e: raise HTTPException(400, str(e))
 
@@ -2149,18 +2159,18 @@ def add_biz(req: BusinessAddRequest, payload: dict = Depends(get_authenticated_u
     print("JWT PAYLOAD:", payload)
     try:
         from datetime import datetime
-        print(f"DEBUG: add_biz request: {req.dict()}")
         
         # Proactive duplicate check to prevent duplicate business listings
         phone_check = req.phone.strip() if req.phone else ""
-        with db_context() as conn:
-            cur = conn.cursor()
+        with mysql_ctx() as conn:
+            cur = conn.cursor(dictionary=True)
             cur.execute(
-                f"SELECT global_business_id FROM {BIZ_TABLE} WHERE LOWER(business_name) = ? AND LOWER(city) = ? AND (phone_number = ? OR LOWER(address) = ?)",
+                f"SELECT global_business_id FROM {BIZ_TABLE} WHERE LOWER(business_name) = %s AND LOWER(city) = %s AND (phone_number = %s OR LOWER(address) = %s)",
                 (req.name.strip().lower(), req.city.strip().lower(), phone_check, req.address.strip().lower())
             )
             if cur.fetchone():
                 raise HTTPException(400, "A business listing with this name and phone/address already exists in this city.")
+            duplicate = cur.fetchone()
 
             created_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
             email_val = (req.email or "").strip().lower()
@@ -2170,12 +2180,20 @@ def add_biz(req: BusinessAddRequest, payload: dict = Depends(get_authenticated_u
                 INSERT INTO {BIZ_TABLE} (
                     business_name, address, phone_number, business_category, city, area, state, 
                     reviews_count, ratings, created_at, email, owner_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (req.name, req.address, req.phone, req.category, req.city, req.area, req.state, 0, 0.0, created_at, email_val, user_id)
             )
             new_id = cur.lastrowid
             conn.commit()
+            print("✅ INSERT COMMITTED")
+            print("New ID:", new_id)
+            
+            print("🔥 REACHED TEST RETURN")
+            return {
+                "success": True,
+                "message": "Insert skipped intentionally for testing."
+            }
 
         # Append to CSV
         try:
@@ -2197,16 +2215,16 @@ def add_biz(req: BusinessAddRequest, payload: dict = Depends(get_authenticated_u
 @app.delete("/api/business/{business_id}")
 def delete_business_route(business_id: int, payload: dict = Depends(get_authenticated_user)):
     user_id = payload.get("id")
-    with db_context() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT owner_id FROM g_map_master_table WHERE global_business_id = ?", (business_id,))
+    with mysql_ctx() as conn:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(f"SELECT owner_id FROM {BIZ_TABLE} WHERE global_business_id = %s LIMIT 1", (business_id,))
         row = cur.fetchone()
-        if row and row[0] and row[0] != user_id:
+        if row and row["owner_id"] and row["owner_id"] != user_id:
             raise HTTPException(403, "You do not have permission to delete this business listing.")
         
-        cur.execute("DELETE FROM products WHERE business_id = ?", (business_id,))
-        cur.execute("DELETE FROM deals WHERE business_id = ?", (business_id,))
-        cur.execute(f"DELETE FROM {BIZ_TABLE} WHERE global_business_id = ?", (business_id,))
+        cur.execute(f"DELETE FROM {PRODUCT_TABLE} WHERE business_id = %s", (business_id,))
+        cur.execute(f"DELETE FROM {DEAL_TABLE} WHERE business_id = %s", (business_id,))
+        cur.execute(f"DELETE FROM {BIZ_TABLE} WHERE global_business_id = %s", (business_id,))
         conn.commit()
 
     # Sync deletion to CSV
@@ -2250,26 +2268,25 @@ def add_product(req: AddProductRequest, payload: dict = Depends(get_authenticate
     user_id = payload.get("id")
     if not req.business_id:
         raise HTTPException(400, "business_id is required. Please login first.")
-    with db_context() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT owner_id FROM g_map_master_table WHERE global_business_id = ?", (req.business_id,))
+    with mysql_ctx() as conn:
+        cur = conn.cursor(dictionary=True)
+        cur.execute( f"SELECT owner_id FROM {BIZ_TABLE} WHERE global_business_id = %s", (req.business_id,))
         row = cur.fetchone()
-        if row and row[0] and row[0] != user_id:
+        cur.fetchall()
+        if row and row["owner_id"] and row["owner_id"] != user_id:
             raise HTTPException(403, "You do not have permission to manage products for this business listing.")
     try:
         from datetime import datetime
-        print("FULL REQUEST:", req.dict())
-        # print(f"DEBUG add_product: business_id={req.business_id}, name={req.name}, price={req.price}, category={req.category}")
-        with db_context() as conn:
+        with mysql_ctx() as conn:
             cur = conn.cursor()
             created_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-            cur.execute("""
-                INSERT INTO products (business_id, name, price, description, category, created_at, image_url)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+            cur.execute(F"""
+                INSERT INTO {PRODUCT_TABLE} (business_id, product_name, price, description, category, created_at, image_url)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (int(req.business_id), req.name, float(req.price) if req.price is not None else None, req.description or "", req.category or "", created_at, req.image_url or ""))
             new_id = cur.lastrowid
             conn.commit()
-        log_audit_action(user_id, "CREATE", "products", new_id, "system")
+            log_audit_action(user_id, "CREATE", PRODUCT_TABLE, new_id, "system")
         return {"success": True}
     except Exception as e:
         print(f"ERROR add_product: {e}")
@@ -2280,33 +2297,33 @@ def add_deal(req: AddDealRequest, payload: dict = Depends(get_authenticated_user
     user_id = payload.get("id")
     if not req.business_id:
         raise HTTPException(400, "business_id is required.")
-    with db_context() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT owner_id FROM g_map_master_table WHERE global_business_id = ?", (req.business_id,))
+    with mysql_ctx() as conn:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(f"SELECT owner_id FROM {BIZ_TABLE} WHERE global_business_id = %s", (req.business_id,))
         row = cur.fetchone()
-        if row and row[0] and row[0] != user_id:
+        if row and row["owner_id"] and row["owner_id"] != user_id:
             raise HTTPException(403, "You do not have permission to manage deals for this business listing.")
     try:
         from datetime import datetime
-        with db_context() as conn:
+        with mysql_ctx() as conn:
             cur = conn.cursor()
             created_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-            cur.execute("""
-                INSERT INTO deals (business_id, title, discount_pct, expiry_date, description, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+            cur.execute(f"""
+                INSERT INTO {DEAL_TABLE} (business_id, title, discount_pct, expiry_date, description, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (req.business_id, req.title, req.discount_pct, req.expiry_date, req.description, created_at))
             new_id = cur.lastrowid
             conn.commit()
-        log_audit_action(user_id, "CREATE", "deals", new_id, "system")
+            log_audit_action(user_id, "CREATE", DEAL_TABLE, new_id, "system")
         return {"success": True}
     except Exception as e: raise HTTPException(400, str(e))
 
 @app.get("/api/business/{biz_id}/products")
 def get_products(biz_id: int):
     try:
-        with db_context() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM products WHERE business_id = ?", (biz_id,))
+        with mysql_ctx() as conn:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(f"SELECT * FROM {PRODUCT_TABLE} WHERE business_id = %s", (biz_id,))
             rows = [dict(r) for r in cur.fetchall()]
         return rows
     except Exception as e: raise HTTPException(400, str(e))
@@ -2314,9 +2331,9 @@ def get_products(biz_id: int):
 @app.get("/api/business/{biz_id}/deals")
 def get_deals(biz_id: int):
     try:
-        with db_context() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM deals WHERE business_id = ?", (biz_id,))
+        with mysql_ctx() as conn:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(f"SELECT * FROM {DEAL_TABLE} WHERE business_id = %s", (biz_id,))
             rows = [dict(r) for r in cur.fetchall()]
         return rows
     except Exception as e: raise HTTPException(400, str(e))
@@ -2324,35 +2341,35 @@ def get_deals(biz_id: int):
 @app.delete("/api/products/{product_id}")
 def delete_product(product_id: int, payload: dict = Depends(get_authenticated_user)):
     user_id = payload.get("id")
-    with db_context() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT business_id FROM products WHERE id = ?", (product_id,))
+    with mysql_ctx() as conn:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(f"SELECT business_id FROM {PRODUCT_TABLE} WHERE global_product_id = %s", (product_id,))
         p_row = cur.fetchone()
         if p_row:
-            cur.execute("SELECT owner_id FROM g_map_master_table WHERE global_business_id = ?", (p_row[0],))
+            cur.execute(f"SELECT owner_id FROM {BIZ_TABLE} WHERE global_business_id = %s", (p_row["business_id"],))
             b_row = cur.fetchone()
-            if b_row and b_row[0] and b_row[0] != user_id:
+            if b_row and b_row["owner_id"] and b_row["owner_id"] != user_id:
                 raise HTTPException(403, "You do not have permission to modify this product.")
-        cur.execute("DELETE FROM products WHERE id = ?", (product_id,))
+        cur.execute(f"DELETE FROM {PRODUCT_TABLE} WHERE global_product_id = %s", (product_id,))
         conn.commit()
-    log_audit_action(user_id, "DELETE", "products", product_id, "system")
+    log_audit_action(user_id, "DELETE", PRODUCT_TABLE, product_id, "system")
     return {"success": True}
 
 @app.delete("/api/deals/{deal_id}")
 def delete_deal(deal_id: int, payload: dict = Depends(get_authenticated_user)):
     user_id = payload.get("id")
-    with db_context() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT business_id FROM deals WHERE id = ?", (deal_id,))
+    with mysql_ctx() as conn:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(f"SELECT business_id FROM {DEAL_TABLE} WHERE global_deal_id = %s", (deal_id,))
         d_row = cur.fetchone()
         if d_row:
-            cur.execute("SELECT owner_id FROM g_map_master_table WHERE global_business_id = ?", (d_row[0],))
+            cur.execute(f"SELECT owner_id FROM {BIZ_TABLE} WHERE global_business_id = %s", (d_row["business_id"],))
             b_row = cur.fetchone()
-            if b_row and b_row[0] and b_row[0] != user_id:
+            if b_row and b_row["owner_id"] and b_row["owner_id"] != user_id:
                 raise HTTPException(403, "You do not have permission to modify this deal.")
-        cur.execute("DELETE FROM deals WHERE id = ?", (deal_id,))
+        cur.execute(f"DELETE FROM {DEAL_TABLE} WHERE global_deal_id = %s", (deal_id,))
         conn.commit()
-    log_audit_action(user_id, "DELETE", "deals", deal_id, "system")
+    log_audit_action(user_id, "DELETE", DEAL_TABLE, deal_id, "system")
     return {"success": True}
 
 @app.get("/api/business/search-name")

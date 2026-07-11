@@ -52,7 +52,6 @@ def _get_pool():
         )
     return _pool
 
-
 class mysql_ctx:
     """Context manager for thread-safe MySQL queries (read-only).
 
@@ -68,12 +67,16 @@ class mysql_ctx:
         return self.conn
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.conn and self.conn.is_connected():
-            try:
-                self.conn.close()       # returns to pool
-            except Exception:
-                pass
-
+        try:
+            if self.conn and self.conn.is_connected():
+                self.conn.consume_results()
+        except Exception:
+            pass
+        try:
+            if self.conn:
+                self.conn.close()
+        except Exception:
+            pass
 
 def get_mysql_connection():
     """Return an active MySQL connection for future use.

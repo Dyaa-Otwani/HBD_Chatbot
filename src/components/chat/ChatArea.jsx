@@ -817,11 +817,12 @@ const ChatArea = (props) => {
           content: data.content !== undefined ? data.content : (data.data || ''),
           intro: data.intro
         }]);
-      } catch { removeThinking(); }
+      } catch {removeThinking(); }
     }
     if (action === 'manage_deals') {
       addThinking();
       try {
+        const business = payload || selectedBusiness;
         const data = await api.query({ query: 'manage deal', business_id: business.global_business_id, session, language: lang, session_id: currentSessionId });
         removeThinking();
         setLocalMessages(prev => [...prev, {
@@ -830,7 +831,7 @@ const ChatArea = (props) => {
           content: data.content !== undefined ? data.content : (data.data || ''),
           intro: data.intro
         }]);
-      } catch { removeThinking(); }
+      } catch {removeThinking(); }
     }
     if (action === 'delete_product') {
       const res = await api.deleteProduct(payload);
@@ -1150,6 +1151,11 @@ const ChatArea = (props) => {
             flexShrink: 0,
           }}
         >
+        <div style={{display: "flex", gap: "10px", padding: "10px 14px", overflowX: "auto", borderTop: "1px solid var(--border-subtle)", background: "var(--bg-primary)"}}>
+            <button onClick={() => handleAction('add_new_business')} style={{ background: "var(--bg-surface-2)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)", borderRadius: "999px", padding: "10px 90px", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", fontSize: "13px", transition: "0.2s" }} onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-3px) scale(1.04)"; e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.18)"; e.currentTarget.style.background = "var(--color-primary)"; e.currentTarget.style.color = "#fff";}} onMouseLeave={(e) => {e.currentTarget.style.transform = "translateY(0) scale(1)"; e.currentTarget.style.boxShadow = "0 2px 6px rgba(0,0,0,0.08)"; e.currentTarget.style.background = "var(--bg-surface-2)"; e.currentTarget.style.color = "var(--text-primary)";}} onMouseDown={(e) => { e.currentTarget.style.transform = "scale(0.97)";}} onMouseUp={(e) => { e.currentTarget.style.transform = "translateY(-3px) scale(1.04)";}}>➕ Add Business</button>
+            <button onClick={() => handleAction('search')} style={{ background: "var(--bg-surface-2)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)", borderRadius: "999px", padding: "10px 90px", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", fontSize: "13px", transition: "0.2s" }} onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-3px) scale(1.04)"; e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.18)"; e.currentTarget.style.background = "var(--color-primary)"; e.currentTarget.style.color = "#fff";}} onMouseLeave={(e) => {e.currentTarget.style.transform = "translateY(0) scale(1)"; e.currentTarget.style.boxShadow = "0 2px 6px rgba(0,0,0,0.08)"; e.currentTarget.style.background = "var(--bg-surface-2)"; e.currentTarget.style.color = "var(--text-primary)";}} onMouseDown={(e) => { e.currentTarget.style.transform = "scale(0.97)";}} onMouseUp={(e) => { e.currentTarget.style.transform = "translateY(-3px) scale(1.04)";}}>🏢 My Businesses</button>
+            <button onClick={() => handleAction('update')} style={{ background: "var(--bg-surface-2)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)", borderRadius: "999px", padding: "10px 90px", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", fontSize: "13px", transition: "0.2s" }} onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-3px) scale(1.04)"; e.currentTarget.style.boxShadow = "0 8px 20px rgba(0,0,0,0.18)"; e.currentTarget.style.background = "var(--color-primary)"; e.currentTarget.style.color = "#fff";}} onMouseLeave={(e) => {e.currentTarget.style.transform = "translateY(0) scale(1)"; e.currentTarget.style.boxShadow = "0 2px 6px rgba(0,0,0,0.08)"; e.currentTarget.style.background = "var(--bg-surface-2)"; e.currentTarget.style.color = "var(--text-primary)";}} onMouseDown={(e) => { e.currentTarget.style.transform = "scale(0.97)";}} onMouseUp={(e) => { e.currentTarget.style.transform = "translateY(-3px) scale(1.04)";}}>✏️ Update Businesses</button>
+        </div>
           <div style={{
             display: 'flex',
             alignItems: 'center',

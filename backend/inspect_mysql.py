@@ -2,11 +2,11 @@
 import mysql.connector
 
 conn = mysql.connector.connect(
-    host="YOUR_HOST",
-    user="YOUR_USER",
-    password="YOUR_PASSWORD",  
-    database="YOUR_DATABASE",
-    port=3306
+    host="your_host",
+    port=3306,
+    user="your_username",
+    password="your_password",
+    database="your_database"
 )
 cursor = conn.cursor()
 
