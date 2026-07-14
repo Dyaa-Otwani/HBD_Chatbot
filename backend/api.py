@@ -20,6 +20,7 @@ import random
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from assistant_manager import parse_query_nlu
+from db_init import initialize_database
 
 load_dotenv()
 
@@ -41,6 +42,7 @@ CSV_PATH = os.path.join(_BASE_DIR, "g_map_master_table_sample.csv")
 
 # ── Verify MySQL connection on startup ──────────────────────────────
 test_mysql_connection()
+initialize_database()
 print(f"[DB] SQLite (app data): {DATABASE_URL}")
 
 # Self-healing: Ensure bookmarks table exists on startup
