@@ -18,6 +18,7 @@ import random
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from assistant_manager import parse_query_nlu
+from db_init import initialize_database
 
 load_dotenv()
 
@@ -34,11 +35,11 @@ _DB_ENV = os.getenv("DATABASE_URL") or "google_map_data.db"
 # Always resolve relative to THIS file's directory so it works regardless of CWD
 DATABASE_URL = _DB_ENV if os.path.isabs(_DB_ENV) else os.path.join(_BASE_DIR, os.path.basename(_DB_ENV))
 
-print(f"[DB] SQLite PATH: {os.path.abspath(DATABASE_URL)}")
 CSV_PATH = os.path.join(_BASE_DIR, "g_map_master_table_sample.csv")
 
 # ── Verify MySQL connection on startup ──────────────────────────────
 test_mysql_connection()
+initialize_database()
 print(f"[DB] All data stored in MySQL: {os.getenv('MYSQL_DATABASE')}")
 
 
@@ -3112,37 +3113,6 @@ def delete_business_photo(photo_id: int, payload: dict = Depends(get_authenticat
     except Exception as e:
         raise HTTPException(400, str(e))
 
-
-@app.get("/api/bookmarks")
-def list_bookmarks(user_id: str):
-    try:
-        # Get bookmark IDs from SQLite
-        with db_context() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT business_id FROM chatbot_bookmarks WHERE user_id = ? ORDER BY id DESC", (user_id,))
-            biz_ids = [r[0] for r in cur.fetchall()]
-        if not biz_ids:
-            return []
-        # Fetch business details from MySQL using global_business_id
-        placeholders = ",".join("%s" for _ in biz_ids)
-        with mysql_ctx() as myconn:
-            mycur = myconn.cursor(dictionary=True)
-            mycur.execute(f"SELECT * FROM master_table WHERE global_business_id IN ({placeholders})", tuple(biz_ids))
-            rows = mycur.fetchall()
-        return map_business_fields(rows)
-    except Exception as e:
-        raise HTTPException(400, str(e))
-
-@app.delete("/api/bookmarks/{business_id}")
-def remove_bookmark(business_id: int, user_id: str):
-    try:
-        with db_context() as conn:
-            cur = conn.cursor()
-            cur.execute("DELETE FROM chatbot_bookmarks WHERE user_id = ? AND business_id = ?", (user_id, business_id))
-            conn.commit()
-        return {"success": True, "message": "Bookmark removed"}
-    except Exception as e:
-        raise HTTPException(400, str(e))
 
 # ── COMPARE BUSINESSES ENDPOINT ───────────────────────────────────────
 
